@@ -52,3 +52,20 @@ void main() {
     gl_FragColor = texture2D(tex, v_tex_coords) * alpha;
 }
 "#;
+
+pub const VERTEX_SHADER_SOLID: &str = r#"
+#version 100
+uniform mat3 matrix;
+attribute vec2 position;
+void main() {
+    gl_Position = vec4(matrix * vec3(position, 1.0), 1.0);
+}"#;
+
+pub const FRAGMENT_SHADER_SOLID: &str = r#"
+#version 100
+precision mediump float;
+uniform vec4 color;
+void main() {
+    gl_FragColor = color;
+}
+"#;

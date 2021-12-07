@@ -472,12 +472,16 @@ impl Space {
             |renderer, frame| {
                 // First clear all damaged regions
                 for geo in &damage {
-                    slog::trace!(self.logger, "Clearing at {:?}", geo);
-                    frame.clear(
+                    //slog::trace!(self.logger, "Clearing at {:?}", geo);
+                    /*frame.clear(
                         clear_color,
-                        Some(geo.to_f64().to_physical(state.render_scale).to_i32_ceil()),
-                    )?;
+                        &[geo.to_f64().to_physical(state.render_scale).to_i32_round()],
+                    )?;*/   
                 }
+                frame.clear(
+                    clear_color,
+                    &damage.iter().map(|geo| geo.to_f64().to_physical(state.render_scale).to_i32_round()).collect::<Vec<_>>(),
+                )?;
 
                 // Then re-draw all window overlapping with a damage rect.
                 for window in self.windows.iter() {
@@ -486,7 +490,15 @@ impl Space {
                     if damage.iter().any(|geo| wgeo.overlaps(*geo)) {
                         loc -= output_geo.loc;
                         slog::trace!(self.logger, "Rendering window at {:?}", wgeo);
-                        draw_window(renderer, frame, window, state.render_scale, loc, &self.logger)?;
+                        let win_damage = damage.iter()
+                            .filter(|geo| geo.overlaps(wgeo))
+                            .map(|geo| geo.clamp_to_rect(wgeo))
+                            .map(|geo| Rectangle::from_loc_and_size(
+                                geo.loc - wgeo.loc,
+                                geo.size
+                            ))
+                            .collect::<Vec<_>>();
+                        draw_window(renderer, frame, window, state.render_scale, loc, &win_damage, &self.logger)?;
                         window_state(self.id, window).drawn = true;
                     }
                 }
