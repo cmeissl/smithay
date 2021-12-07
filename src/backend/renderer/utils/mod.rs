@@ -66,6 +66,7 @@ pub fn on_commit_buffer_handler(surface: &WlSurface) {
     }
 }
 
+/// TODO
 pub fn draw_surface_tree<R, E, F, T>(
     renderer: &mut R,
     frame: &mut F,
@@ -155,7 +156,7 @@ where
                         surface_offset.to_f64().to_physical(scale).to_i32_round(),
                         buffer_dimensions.unwrap(),
                     );
-                    let damage = damage
+                    let new_damage = damage
                         .iter()
                         .cloned()
                         .filter(|geo| geo.overlaps(rect))
@@ -170,7 +171,7 @@ where
                         buffer_scale,
                         scale,
                         attributes.buffer_transform.into(),
-                        &damage,
+                        &new_damage,
                         1.0,
                     ) {
                         result = Err(err);

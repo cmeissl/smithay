@@ -489,7 +489,6 @@ impl Space {
                     let mut loc = window_loc(window, &self.id);
                     if damage.iter().any(|geo| wgeo.overlaps(*geo)) {
                         loc -= output_geo.loc;
-                        slog::trace!(self.logger, "Rendering window at {:?}", wgeo);
                         let win_damage = damage.iter()
                             .filter(|geo| geo.overlaps(wgeo))
                             .map(|geo| geo.clamp_to_rect(wgeo))
@@ -498,6 +497,7 @@ impl Space {
                                 geo.size
                             ))
                             .collect::<Vec<_>>();
+                        slog::trace!(self.logger, "Rendering window at {:?} with damage {:?}", wgeo, damage);
                         draw_window(renderer, frame, window, state.render_scale, loc, &win_damage, &self.logger)?;
                         window_state(self.id, window).drawn = true;
                     }
