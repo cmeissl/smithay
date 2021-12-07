@@ -61,6 +61,7 @@ struct Gles2SolidProgram {
     uniform_matrix: ffi::types::GLint,
     uniform_color: ffi::types::GLint,
     attrib_position: ffi::types::GLint,
+    attrib_transform: ffi::types::GLint,
 }
 
 /// A handle to a GLES2 texture
@@ -396,12 +397,14 @@ unsafe fn solid_program(gl: &ffi::Gles2) -> Result<Gles2SolidProgram, Gles2Error
     let matrix = CStr::from_bytes_with_nul(b"matrix\0").expect("NULL terminated");
     let color = CStr::from_bytes_with_nul(b"color\0").expect("NULL terminated");
     let position = CStr::from_bytes_with_nul(b"position\0").expect("NULL terminated");
+    let transform = CStr::from_bytes_with_nul(b"transform\0").expect("NULL terminated");;
 
     Ok(Gles2SolidProgram {
         program,
         uniform_matrix: gl.GetUniformLocation(program, matrix.as_ptr() as *const ffi::types::GLchar),
         uniform_color: gl.GetUniformLocation(program, color.as_ptr() as *const ffi::types::GLchar),
         attrib_position: gl.GetAttribLocation(program, position.as_ptr() as *const ffi::types::GLchar),
+        attrib_transform: gl.GetAttribLocation(program, transform.as_ptr() as *const ffi::types::GLchar),
     })
 }
 
@@ -1144,15 +1147,10 @@ impl Frame for Gles2Frame {
             return Ok(());
         }
 
-        let vertices = at.iter().map(|rect| {
-            [
-                (rect.loc.x + rect.size.w) as f32 / self.size.w as f32,     rect.loc.y as f32 / self.size.h as f32, // top right
-                rect.loc.x as f32 / self.size.w as f32,                     rect.loc.y as f32 / self.size.h as f32, // top left
-                (rect.loc.x + rect.size.w) as f32 / self.size.w as f32,     (rect.loc.y + rect.size.h) as f32 / self.size.h as f32, // bottom right
-                rect.loc.x as f32 / self.size.w as f32,                     (rect.loc.y + rect.size.h) as f32 / self.size.h as f32, // bottom left
-            ]
-        }).flatten().collect::<Vec<f32>>();
-        
+        let vertices = vec![1.0f32, 0.0f32, 0.0f32, 0.0f32, 1.0f32, 1.0f32, 0.0f32, 1.0f32];
+
+        let transforms = vec![0.25f32, 0.75f32, 0.5f32, 0.05f32];
+
         let mut mat = Matrix3::<f32>::identity();
         mat = mat * Matrix3::from_translation(Vector2::new(0.0, 0.0));
         mat = mat * Matrix3::from_nonuniform_scale(self.size.w as f32, self.size.h as f32);
@@ -1160,39 +1158,69 @@ impl Frame for Gles2Frame {
 
         unsafe {
             self.gl.UseProgram(self.solid_program.program);
-            self.gl.Uniform4f(self.solid_program.uniform_color, color[0], color[1], color[2], color[3]);
-            self.gl.UniformMatrix3fv(
-                self.solid_program.uniform_matrix,
-                1,
+            self.gl.Uniform4f(
+                self.solid_program.uniform_color,
+                color[0],
+                color[1],
+                color[2],
+                color[3],
+            );
+            self.gl
+                .UniformMatrix3fv(self.solid_program.uniform_matrix, 1, ffi::FALSE, mat.as_ptr());
+
+            // Setup
+
+            let mut mesh_voa = 0;
+            let mut vertex_vbo = 0;
+            let mut instance_vbo = 0;
+            self.gl.GenVertexArrays(1, &mut mesh_voa);
+            self.gl.GenBuffers(1, &mut instance_vbo);
+            self.gl.GenBuffers(1, &mut vertex_vbo);
+
+            self.gl.BindVertexArray(mesh_voa);
+
+            self.gl.BindBuffer(ffi::ARRAY_BUFFER, vertex_vbo);
+            self.gl.BufferData(
+                ffi::ARRAY_BUFFER,
+                (std::mem::size_of::<ffi::types::GLfloat>() * vertices.len()) as isize,
+                vertices.as_ptr() as *const _,
+                ffi::STATIC_DRAW,
+            );
+            self.gl
+                .EnableVertexAttribArray(self.solid_program.attrib_position as u32);
+            self.gl.VertexAttribPointer(
+                self.solid_program.attrib_position as u32,
+                2,
+                ffi::FLOAT,
                 ffi::FALSE,
-                mat.as_ptr(),
+                (2 * std::mem::size_of::<ffi::types::GLfloat>()) as i32,
+                0 as *const _,
             );
 
-            if let Some(instance_vbo) = self.instance_vbo.as_ref() {
-                self.gl.BindBuffer(ffi::ARRAY_BUFFER, *instance_vbo);
-                self.gl.EnableVertexAttribArray(self.solid_program.attrib_position as u32);
-                self.gl.BufferData(ffi::ARRAY_BUFFER, 
-                    (std::mem::size_of::<ffi::types::GLfloat>() * vertices.len()) as isize,
-                    vertices.as_ptr() as *const _,
-                    ffi::STREAM_DRAW
-                );
-                self.gl.VertexAttribPointer(
-                    self.solid_program.attrib_position as u32,
-                    2,
-                    ffi::FLOAT,
-                    ffi::FALSE,
-                    0, //(2 * std::mem::size_of::<ffi::types::GLfloat>()) as i32,
-                    0 as *const _,
-                );
-                self.gl.BindBuffer(ffi::ARRAY_BUFFER, 0);
-                self.gl.VertexAttribDivisor(
-                    self.solid_program.attrib_position as u32,
-                    1,
-                );
-                self.gl.DrawArraysInstanced(ffi::TRIANGLE_STRIP, 0, 4, 1);// at.len() as i32);
-                self.gl
-                    .DisableVertexAttribArray(self.solid_program.attrib_position as u32);
-            }
+            self.gl.BindBuffer(ffi::ARRAY_BUFFER, instance_vbo);
+            self.gl.BufferData(
+                ffi::ARRAY_BUFFER,
+                (std::mem::size_of::<ffi::types::GLfloat>() * transforms.len()) as isize,
+                transforms.as_ptr() as *const _,
+                ffi::STATIC_DRAW,
+            );
+            self.gl
+                .EnableVertexAttribArray(self.solid_program.attrib_transform as u32);
+            self.gl.VertexAttribPointer(
+                self.solid_program.attrib_transform  as u32,
+                2,
+                ffi::FLOAT,
+                ffi::FALSE,
+                (2 * std::mem::size_of::<ffi::types::GLfloat>()) as i32,
+                0 as *const _,
+            );
+            self.gl.VertexAttribDivisor(self.solid_program.attrib_transform  as u32, 1);
+            self.gl.BindBuffer(ffi::ARRAY_BUFFER, 0);
+
+            // Draw
+            self.gl.BindVertexArray(mesh_voa);
+            self.gl.DrawArraysInstanced(ffi::TRIANGLE_STRIP, 0, 4, 2);
+            self.gl.BindVertexArray(0);
         }
 
         Ok(())
@@ -1239,17 +1267,25 @@ impl Frame for Gles2Frame {
             .truncate(), // bottom-right
             (texture_mat * Vector3::new(src.loc.x as f32, (src.loc.y + src.size.h) as f32, 0.0)).truncate(), // bottom-left
         ];
-        
-        let vertices = damage.iter().map(|rect| {
-            [
-                (rect.loc.x + rect.size.w) as f32 / self.size.w as f32,     rect.loc.y as f32 / self.size.h as f32, // top right
-                rect.loc.x as f32 / self.size.w as f32,                     rect.loc.y as f32 / self.size.h as f32, // top left
-                (rect.loc.x + rect.size.w) as f32 / self.size.w as f32,     (rect.loc.y + rect.size.h) as f32 / self.size.h as f32, // bottom right
-                rect.loc.x as f32 / self.size.w as f32,                     (rect.loc.y + rect.size.h) as f32 / self.size.h as f32, // bottom left
-            ]
-        }).flatten().collect::<Vec<_>>();
-        
-        self.render_texture(texture, mat, None/*Some(&vertices)*/, tex_verts, alpha)
+
+        let vertices = damage
+            .iter()
+            .map(|rect| {
+                [
+                    (rect.loc.x + rect.size.w) as f32 / self.size.w as f32,
+                    rect.loc.y as f32 / self.size.h as f32, // top right
+                    rect.loc.x as f32 / self.size.w as f32,
+                    rect.loc.y as f32 / self.size.h as f32, // top left
+                    (rect.loc.x + rect.size.w) as f32 / self.size.w as f32,
+                    (rect.loc.y + rect.size.h) as f32 / self.size.h as f32, // bottom right
+                    rect.loc.x as f32 / self.size.w as f32,
+                    (rect.loc.y + rect.size.h) as f32 / self.size.h as f32, // bottom left
+                ]
+            })
+            .flatten()
+            .collect::<Vec<_>>();
+
+        self.render_texture(texture, mat, None /*Some(&vertices)*/, tex_verts, alpha)
     }
 }
 
@@ -1318,7 +1354,12 @@ impl Gles2Frame {
             self.gl
                 .EnableVertexAttribArray(self.tex_programs[tex.0.texture_kind].attrib_tex_coords as u32);
 
-            self.gl.DrawArraysInstanced(ffi::TRIANGLE_STRIP, 0, 4, instances.map(|x| x.len()).unwrap_or(1) as i32);
+            self.gl.DrawArraysInstanced(
+                ffi::TRIANGLE_STRIP,
+                0,
+                4,
+                instances.map(|x| x.len()).unwrap_or(1) as i32,
+            );
 
             self.gl
                 .DisableVertexAttribArray(self.tex_programs[tex.0.texture_kind].attrib_position as u32);

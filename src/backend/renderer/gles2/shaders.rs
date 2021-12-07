@@ -55,10 +55,13 @@ void main() {
 
 pub const VERTEX_SHADER_SOLID: &str = r#"
 #version 100
-uniform mat3 matrix;
 attribute vec2 position;
+attribute vec2 transform;
+
+uniform mat3 matrix;
+
 void main() {
-    gl_Position = vec4(matrix * vec3(position, 1.0), 1.0);
+    gl_Position = vec4(matrix * vec3(position.x + transform.x, position.y + transform.y, 1.0), 1.0);
 }"#;
 
 pub const FRAGMENT_SHADER_SOLID: &str = r#"
