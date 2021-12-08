@@ -13,19 +13,23 @@ attribute vec4 position;
 
 varying vec2 v_tex_coords;
 
+mat2 scale(vec2 scale_vec){
+    return mat2(scale_vec.x,0.0,
+                0.0,scale_vec.y);
+}
+
 void main() {
-    mat3 transform = mat3(
-        position.z, 0.0, 0.0,
-        0.0, position.w, 0.0,
-        0.0, 0.0, 1.0
-    );
     if (invert_y) {
         v_tex_coords = vec2(tex_coords.x, 1.0 - tex_coords.y);
     } else {
         v_tex_coords = tex_coords;
     }
-    v_tex_coords = (transform * vec3(tex_coords, 1.0)).xy;
-    gl_Position = vec4(matrix * transform * vec3(vert, 1.0), 1.0);
+
+    vec2 transform_translation = vec2(position.x, position.y);
+    vec2 transform_scale = vec2(position.z, position.w);
+
+    v_tex_coords = (vec3((tex_coords *  scale(transform_scale)) + transform_translation, 1.0)).xy;
+    gl_Position = vec4(matrix * vec3((vert * scale(transform_scale)) + transform_translation, 1.0), 1.0);
 }
 "#;
 
@@ -74,17 +78,20 @@ void main() {
 pub const VERTEX_SHADER_SOLID: &str = r#"
 #version 100
 
-uniform mat3 matrix;
 attribute vec2 vert;
 attribute vec4 position;
 
+uniform mat3 matrix;
+
+mat2 scale(vec2 scale_vec){
+    return mat2(scale_vec.x,0.0,
+                0.0,scale_vec.y);
+}
+
 void main() {
-    mat3 transform = mat3(
-        position.z, 0.0, 0.0,
-        0.0, position.w, 0.0,
-        position.x, position.y, 1.0
-    );
-    gl_Position = vec4(matrix * transform * vec3(vert, 1.0), 1.0);
+    vec2 transform_translation = vec2(position.x, position.y);
+    vec2 transform_scale = vec2(position.z, position.w);
+    gl_Position = vec4(matrix * vec3((vert * scale(transform_scale)) + transform_translation, 1.0), 1.0);
 }
 "#;
 

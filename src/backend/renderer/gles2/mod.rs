@@ -1219,6 +1219,10 @@ impl Frame for Gles2Frame {
                     0,
                 );
             } else {
+                self.gl.VertexAttribDivisor(
+                    self.solid_program.attrib_position as u32,
+                    4,
+                );
                 for i in 0..at.len() {
                     self.gl.VertexAttribPointer(
                         self.solid_program.attrib_position as u32,
@@ -1228,7 +1232,6 @@ impl Frame for Gles2Frame {
                         0,
                         (i * 4 * std::mem::size_of::<f32>()) as *const _,
                     );
-                
                     self.gl.DrawArrays(ffi::TRIANGLE_STRIP, 0, 4);
                 }
             }
@@ -1394,6 +1397,10 @@ impl Gles2Frame {
                     0,
                 );
             } else {
+                self.gl.VertexAttribDivisor(
+                    self.solid_program.attrib_position as u32,
+                    4,
+                );
                 for i in 0..count {
                     self.gl.VertexAttribPointer(
                         self.tex_programs[tex.0.texture_kind].attrib_position as u32,
