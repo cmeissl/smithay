@@ -6,17 +6,26 @@ pub const VERTEX_SHADER: &str = r#"
 #version 100
 uniform mat3 matrix;
 uniform bool invert_y;
-attribute vec2 position;
+
+attribute vec2 vert;
 attribute vec2 tex_coords;
+attribute vec4 position;
+
 varying vec2 v_tex_coords;
 
 void main() {
-    gl_Position = vec4(matrix * vec3(position, 1.0), 1.0);
+    mat3 transform = mat3(
+        position.z, 0.0, 0.0,
+        0.0, position.w, 0.0,
+        0.0, 0.0, 1.0
+    );
     if (invert_y) {
-        v_tex_coords = vec2(position.x, 1.0 - position.y);
+        v_tex_coords = vec2(tex_coords.x, 1.0 - tex_coords.y);
     } else {
-        v_tex_coords = position;
+        v_tex_coords = tex_coords;
     }
+    v_tex_coords = (transform * vec3(tex_coords, 1.0)).xy;
+    gl_Position = vec4(matrix * transform * vec3(vert, 1.0), 1.0);
 }
 "#;
 
@@ -66,10 +75,16 @@ pub const VERTEX_SHADER_SOLID: &str = r#"
 #version 100
 
 uniform mat3 matrix;
-attribute vec2 position;
+attribute vec2 vert;
+attribute vec4 position;
 
 void main() {
-    gl_Position = vec4(matrix * vec3(position, 1.0), 1.0);
+    mat3 transform = mat3(
+        position.z, 0.0, 0.0,
+        0.0, position.w, 0.0,
+        position.x, position.y, 1.0
+    );
+    gl_Position = vec4(matrix * transform * vec3(vert, 1.0), 1.0);
 }
 "#;
 
