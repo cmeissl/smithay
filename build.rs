@@ -37,6 +37,7 @@ fn gl_generate() {
                 "EGL_EXT_image_dma_buf_import_modifiers",
                 "EGL_EXT_buffer_age",
                 "EGL_EXT_swap_buffers_with_damage",
+                "EGL_MESA_platform_surfaceless",
             ],
         )
         .write_bindings(gl_generator::GlobalGenerator, &mut file)
