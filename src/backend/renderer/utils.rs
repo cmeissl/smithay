@@ -2,7 +2,8 @@
 
 use crate::{
     backend::renderer::{buffer_dimensions, Frame, ImportAll, Renderer},
-    utils::{Buffer, Logical, Point, Rectangle, Size, Transform},
+    desktop::utils::{surface_transform, SurfaceTransform},
+    utils::{Buffer, Coordinate, Logical, Point, Rectangle, Size, Transform},
     wayland::compositor::{
         is_sync_subsurface, with_surface_tree_upward, BufferAssignment, Damage, SubsurfaceCachedState,
         SurfaceAttributes, TraversalAction,
@@ -16,6 +17,8 @@ use std::{
     collections::{hash_map::Entry, HashMap},
 };
 use wayland_server::protocol::{wl_buffer::WlBuffer, wl_surface::WlSurface};
+
+use super::Texture;
 
 #[derive(Default)]
 pub(crate) struct SurfaceState {
@@ -202,10 +205,12 @@ where
 {
     let mut result = Ok(());
     let texture_id = (TypeId::of::<<R as Renderer>::TextureId>(), renderer.id());
+    let parent_surface_transform = SurfaceTransform::default();
+
     with_surface_tree_upward(
         surface,
-        location,
-        |_surface, states, location| {
+        (location, parent_surface_transform),
+        |_surface, states, (location, parent_surface_transform)| {
             let mut location = *location;
             if let Some(data) = states.data_map.get::<RefCell<SurfaceState>>() {
                 let mut data_ref = data.borrow_mut();
@@ -244,12 +249,58 @@ where
                 }
                 // Now, should we be drawn ?
                 if data.textures.contains_key(&texture_id) {
+                    let mut surface_transform = surface_transform(states);
                     // if yes, also process the children
                     if states.role == Some("subsurface") {
                         let current = states.cached_state.current::<SubsurfaceCachedState>();
-                        location += current.location;
+                        let current_location = current.location.to_f64();
+                        // When we subtract the crop location we will receive either something positive,
+                        // which is our new corrected location or something negative in which case we need to
+                        // also crop ourself and set the corrected location to zero.
+                        let parent_crop_loc = parent_surface_transform.crop.loc;
+                        let temp = current_location - parent_crop_loc;
+
+                        let (subsurface_x_crop, subsurface_x_location) = if temp.x.is_sign_negative() {
+                            (temp.x.abs(), 0.0)
+                        } else {
+                            (0.0, temp.x)
+                        };
+
+                        let (subsurface_y_crop, subsurface_y_location) = if temp.y.is_sign_negative() {
+                            (temp.y.abs(), 0.0)
+                        } else {
+                            (0.0, temp.y)
+                        };
+                        // Now apply the scaling to the location
+                        let corrected_subsurface_location = Point::<f64, Logical>::from((
+                            subsurface_x_location.upscale(parent_surface_transform.scale.w),
+                            subsurface_y_location.upscale(parent_surface_transform.scale.h),
+                        ));
+
+                        location += corrected_subsurface_location.to_i32_floor();
+
+                        // Now we need to calculate the crop for our subsurfaces
+                        let mut parent_crop_size = parent_surface_transform.crop.size;
+                        // Correct the size so that the subsurface crop can not extend over
+                        // the parent crop. Note: Do not use the scaled subsurface location here!
+                        parent_crop_size.w -= subsurface_x_location;
+                        parent_crop_size.h -= subsurface_y_location;
+                        let subsurface_crop = Rectangle::<f64, Logical>::from_loc_and_size(
+                            (subsurface_x_crop, subsurface_y_crop),
+                            parent_crop_size,
+                        );
+
+                        // Now check if we also define a surface local crop, if yes restrict
+                        // the  subsurface_crop by the surface local crop. In case the crops do not
+                        // intersect the surface will not be visible.
+                        let crop_intersection = surface_transform
+                            .crop
+                            .intersection(subsurface_crop)
+                            .unwrap_or_default();
+
+                        surface_transform.crop = crop_intersection;
                     }
-                    TraversalAction::DoChildren(location)
+                    TraversalAction::DoChildren((location, surface_transform))
                 } else {
                     // we are not displayed, so our children are neither
                     TraversalAction::SkipChildren
@@ -259,7 +310,7 @@ where
                 TraversalAction::SkipChildren
             }
         },
-        |_surface, states, location| {
+        |_surface, states, (location, parent_surface_transform)| {
             let mut location = *location;
             if let Some(data) = states.data_map.get::<RefCell<SurfaceState>>() {
                 let mut data = data.borrow_mut();
@@ -272,15 +323,80 @@ where
                     .get_mut(&texture_id)
                     .and_then(|x| x.downcast_mut::<<R as Renderer>::TextureId>())
                 {
+                    let mut surface_transform = surface_transform(states);
                     let dimensions = dimensions.unwrap();
+
                     // we need to re-extract the subsurface offset, as the previous closure
                     // only passes it to our children
                     let mut surface_offset = (0, 0).into();
                     if states.role == Some("subsurface") {
                         let current = states.cached_state.current::<SubsurfaceCachedState>();
-                        surface_offset = current.location;
-                        location += current.location;
+                        let current_location = current.location.to_f64();
+                        // When we subtract the crop location we will receive either something positive,
+                        // which is our new corrected location or something negative in which case we need to
+                        // also crop ourself and set the corrected location to zero.
+                        let parent_crop_loc = parent_surface_transform.crop.loc;
+                        let temp = current_location - parent_crop_loc;
+
+                        let (subsurface_x_crop, subsurface_x_location) = if temp.x.is_sign_negative() {
+                            (temp.x.abs(), 0.0)
+                        } else {
+                            (0.0, temp.x)
+                        };
+
+                        let (subsurface_y_crop, subsurface_y_location) = if temp.y.is_sign_negative() {
+                            (temp.y.abs(), 0.0)
+                        } else {
+                            (0.0, temp.y)
+                        };
+                        // Now apply the scaling to the location
+                        let corrected_subsurface_location = Point::<f64, Logical>::from((
+                            subsurface_x_location.upscale(parent_surface_transform.scale.w),
+                            subsurface_y_location.upscale(parent_surface_transform.scale.h),
+                        ));
+
+                        surface_offset = corrected_subsurface_location.to_i32_floor();
+                        location += corrected_subsurface_location.to_i32_floor();
+
+                        // Now we need to calculate the crop for our subsurfaces
+                        let mut parent_crop_size = parent_surface_transform.crop.size;
+                        // Correct the size so that the subsurface crop can not extend over
+                        // the parent crop. Note: Do not use the scaled subsurface location here!
+                        parent_crop_size.w -= subsurface_x_location;
+                        parent_crop_size.h -= subsurface_y_location;
+                        let subsurface_crop = Rectangle::<f64, Logical>::from_loc_and_size(
+                            (subsurface_x_crop, subsurface_y_crop),
+                            parent_crop_size,
+                        );
+
+                        // Now check if we also define a surface local crop, if yes restrict
+                        // the  subsurface_crop by the surface local crop. In case the crops do not
+                        // intersect the surface will not be visible.
+                        let crop_intersection = surface_transform
+                            .crop
+                            .intersection(subsurface_crop)
+                            .unwrap_or_default();
+
+                        surface_transform.crop = crop_intersection;
                     }
+
+                    let surface_geo =
+                        Rectangle::from_loc_and_size((0.0f64, 0.0f64), dimensions.to_f64()).intersection(
+                            Rectangle::from_loc_and_size((0.0f64, 0.0f64), surface_transform.crop.size),
+                        );
+
+                    let mut surface_geo = match surface_geo {
+                        Some(geo) => geo,
+                        None => {
+                            // TODO: Log?
+                            eprintln!("no overlap");
+                            return;
+                        }
+                    };
+
+                    // Upsacle the geo
+                    surface_geo.size.w = surface_geo.size.w.upscale(surface_transform.scale.w);
+                    surface_geo.size.h = surface_geo.size.h.upscale(surface_transform.scale.h);
 
                     let damage = damage
                         .iter()
@@ -292,19 +408,48 @@ where
                             geo
                         })
                         // then clamp to surface size again in logical space
-                        .flat_map(|geo| geo.intersection(Rectangle::from_loc_and_size((0, 0), dimensions)))
+                        .flat_map(|geo| {
+                            geo.to_f64().intersection(surface_geo).map(|mut geo| {
+                                // Scale the damage back to surface local coorinates
+                                geo.loc.x = geo.loc.x.downscale(surface_transform.scale.w);
+                                geo.loc.y = geo.loc.y.downscale(surface_transform.scale.h);
+                                geo.size.w = geo.size.w.downscale(surface_transform.scale.w);
+                                geo.size.h = geo.size.h.downscale(surface_transform.scale.h);
+                                geo
+                            })
+                        })
                         // lastly transform it into buffer space
-                        .map(|geo| geo.to_buffer(buffer_scale, buffer_transform, &dimensions))
+                        .map(|geo| geo.to_buffer(buffer_scale as f64, buffer_transform, &dimensions.to_f64()))
                         .collect::<Vec<_>>();
 
+                    let pos = location.to_f64().to_physical(scale);
+                    let dst = Rectangle::from_loc_and_size(pos, surface_geo.size.to_physical(scale));
+
+                    let src = Rectangle::from_loc_and_size(
+                        Point::<f64, Buffer>::from((0., 0.)),
+                        texture.size().to_f64(),
+                    );
+                    let surface_crop = surface_transform.crop.to_buffer(
+                        buffer_scale as f64,
+                        buffer_transform,
+                        &dimensions.to_f64(),
+                    );
+                    let src = match src.intersection(surface_crop) {
+                        Some(src) => src,
+                        None => {
+                            // TODO: Log?
+                            eprintln!("no intersect");
+                            return;
+                        }
+                    };
+
                     // TODO: Take wp_viewporter into account
-                    if let Err(err) = frame.render_texture_at(
+                    if let Err(err) = frame.render_texture_from_to(
                         texture,
-                        location.to_f64().to_physical(scale).to_i32_round(),
-                        buffer_scale,
-                        scale,
-                        attributes.buffer_transform.into(),
+                        src,
+                        dst,
                         &damage,
+                        attributes.buffer_transform.into(),
                         1.0,
                     ) {
                         result = Err(err);

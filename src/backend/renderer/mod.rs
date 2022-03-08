@@ -10,7 +10,7 @@
 use std::collections::HashSet;
 use std::error::Error;
 
-use crate::utils::{Buffer, Physical, Point, Rectangle, Size, Transform};
+use crate::utils::{Buffer, Coordinate, Physical, Point, Rectangle, Size, Transform};
 
 #[cfg(feature = "wayland_frontend")]
 use crate::wayland::compositor::SurfaceData;
@@ -142,21 +142,21 @@ pub trait Frame {
     /// position and applying the given transformation with the given alpha value.
     /// (Meaning `src_transform` should match the orientation of surface being rendered).
     #[allow(clippy::too_many_arguments)]
-    fn render_texture_at(
+    fn render_texture_at<P: Coordinate, D: Coordinate>(
         &mut self,
         texture: &Self::TextureId,
-        pos: Point<f64, Physical>,
+        pos: Point<P, Physical>,
         texture_scale: i32,
         output_scale: f64,
         src_transform: Transform,
-        damage: &[Rectangle<i32, Buffer>],
+        damage: &[Rectangle<D, Buffer>],
         alpha: f32,
     ) -> Result<(), Self::Error> {
         self.render_texture_from_to(
             texture,
-            Rectangle::from_loc_and_size(Point::<i32, Buffer>::from((0, 0)), texture.size()),
+            Rectangle::from_loc_and_size(Point::<i32, Buffer>::from((0, 0)), texture.size()).to_f64(),
             Rectangle::from_loc_and_size(
-                pos,
+                pos.to_f64(),
                 texture
                     .size()
                     .to_logical(texture_scale, src_transform)
@@ -172,12 +172,12 @@ pub trait Frame {
     /// Render part of a texture as given by src to the current target into the rectangle described by dst
     /// as a flat 2d-plane after applying the inverse of the given transformation.
     /// (Meaning `src_transform` should match the orientation of surface being rendered).
-    fn render_texture_from_to(
+    fn render_texture_from_to<SRC: Coordinate, DST: Coordinate, DAM: Coordinate>(
         &mut self,
         texture: &Self::TextureId,
-        src: Rectangle<i32, Buffer>,
-        dst: Rectangle<f64, Physical>,
-        damage: &[Rectangle<i32, Buffer>],
+        src: Rectangle<SRC, Buffer>,
+        dst: Rectangle<DST, Physical>,
+        damage: &[Rectangle<DAM, Buffer>],
         src_transform: Transform,
         alpha: f32,
     ) -> Result<(), Self::Error>;

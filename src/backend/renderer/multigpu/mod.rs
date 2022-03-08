@@ -879,7 +879,7 @@ where
                                     frame.render_texture_from_to(
                                         &texture,
                                         Rectangle::from_loc_and_size((0, 0), buffer_size),
-                                        Rectangle::from_loc_and_size((0, 0), size).to_f64(),
+                                        Rectangle::from_loc_and_size((0, 0), size),
                                         &damage,
                                         dst_transform.invert(),
                                         1.0,
@@ -1159,15 +1159,16 @@ where
             .map_err(Error::Render)
     }
 
-    fn render_texture_from_to(
+    fn render_texture_from_to<SRC: Coordinate, DST: Coordinate, DAM: Coordinate>(
         &mut self,
         texture: &Self::TextureId,
-        src: Rectangle<i32, BufferCoords>,
-        dst: Rectangle<f64, Physical>,
-        damage: &[Rectangle<i32, BufferCoords>],
+        src: Rectangle<SRC, BufferCoords>,
+        dst: Rectangle<DST, Physical>,
+        damage: &[Rectangle<DAM, BufferCoords>],
         src_transform: Transform,
         alpha: f32,
     ) -> Result<(), Self::Error> {
+        let dst = dst.to_f64();
         if let Some(texture) = texture.get::<R>(&self.node) {
             self.damage.extend(damage.iter().map(|rect| {
                 let src = src.to_f64();

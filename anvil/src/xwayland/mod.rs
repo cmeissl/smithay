@@ -210,9 +210,11 @@ impl X11State {
         }
 
         let x11surface = X11Surface { surface };
-        self.space
-            .borrow_mut()
-            .map_window(&Window::new(Kind::X11(x11surface)), location, true);
+        self.space.borrow_mut().map_window(
+            &Window::new_with_size(Kind::X11(x11surface), Some((800, 600).into())),
+            location,
+            true,
+        );
     }
 }
 

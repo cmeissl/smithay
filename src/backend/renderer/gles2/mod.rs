@@ -24,16 +24,19 @@ use super::{
     Bind, ExportDma, ExportMem, Frame, ImportDma, ImportMem, Offscreen, Renderer, Texture, TextureFilter,
     TextureMapping, Unbind,
 };
-use crate::backend::allocator::{
-    dmabuf::{Dmabuf, WeakDmabuf},
-    Format,
-};
 use crate::backend::egl::{
     ffi::egl::{self as ffi_egl, types::EGLImage},
     EGLContext, EGLSurface, MakeCurrentError,
 };
 use crate::backend::SwapBuffersError;
 use crate::utils::{Buffer, Physical, Rectangle, Size, Transform};
+use crate::{
+    backend::allocator::{
+        dmabuf::{Dmabuf, WeakDmabuf},
+        Format,
+    },
+    utils::Coordinate,
+};
 
 #[cfg(all(feature = "wayland_frontend", feature = "use_system_lib"))]
 use super::ImportEgl;
@@ -1945,15 +1948,18 @@ impl Frame for Gles2Frame {
         Ok(())
     }
 
-    fn render_texture_from_to(
+    fn render_texture_from_to<SRC: Coordinate, DST: Coordinate, DAM: Coordinate>(
         &mut self,
         texture: &Self::TextureId,
-        src: Rectangle<i32, Buffer>,
-        dest: Rectangle<f64, Physical>,
-        damage: &[Rectangle<i32, Buffer>],
+        src: Rectangle<SRC, Buffer>,
+        dest: Rectangle<DST, Physical>,
+        damage: &[Rectangle<DAM, Buffer>],
         transform: Transform,
         alpha: f32,
     ) -> Result<(), Self::Error> {
+        let src = src.to_f64();
+        let dest = dest.to_f64();
+
         let mut mat = Matrix3::<f32>::identity();
 
         // position and scale

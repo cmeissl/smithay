@@ -176,14 +176,9 @@ impl PopupManager {
     pub fn popups_for_surface(
         surface: &WlSurface,
     ) -> Result<impl Iterator<Item = (PopupKind, Point<i32, Logical>)>, DeadResource> {
-        with_states(surface, |states| {
-            states
-                .data_map
-                .get::<PopupTree>()
-                .map(|x| x.iter_popups())
-                .into_iter()
-                .flatten()
-        })
+        let tree = with_states(surface, |states| states.data_map.get::<PopupTree>().cloned())?;
+
+        Ok(tree.map(|x| x.iter_popups()).into_iter().flatten())
     }
 
     pub(crate) fn dismiss_popup(surface: &WlSurface, popup: &PopupKind) -> Result<(), DeadResource> {

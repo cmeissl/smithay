@@ -9,6 +9,7 @@ use wayland_server::{
 };
 
 use crate::{
+    desktop::utils::surface_transform,
     utils::{Logical, Point},
     wayland::{compositor, Serial},
 };
@@ -137,14 +138,17 @@ impl PointerInternal {
 
         // do we enter one ?
         if let Some((surface, surface_location)) = focus {
+            let surface_transform = compositor::with_states(&surface, surface_transform).unwrap_or_default();
+
             let entered = self.focus.is_none();
             // in all cases, update the focus, the coordinates of the surface
             // might have changed
             self.focus = Some((surface, surface_location));
-            let (x, y) = (location - surface_location.to_f64()).into();
+
+            let surface_local = surface_transform.revert_point(location - surface_location.to_f64());
             if entered {
                 self.with_focused_pointers(|pointer, surface| {
-                    pointer.enter(serial.into(), surface, x, y);
+                    pointer.enter(serial.into(), surface, surface_local.x, surface_local.y);
                     if pointer.as_ref().version() >= 5 {
                         pointer.frame();
                     }
@@ -152,7 +156,7 @@ impl PointerInternal {
             } else {
                 // we were on top of a surface and remained on it
                 self.with_focused_pointers(|pointer, _| {
-                    pointer.motion(time, x, y);
+                    pointer.motion(time, surface_local.x, surface_local.y);
                     if pointer.as_ref().version() >= 5 {
                         pointer.frame();
                     }

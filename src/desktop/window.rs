@@ -1,15 +1,18 @@
 use crate::{
-    backend::renderer::{utils::draw_surface_tree, ImportAll, Renderer},
+    backend::renderer::{
+        utils::{draw_surface_tree, SurfaceState},
+        ImportAll, Renderer,
+    },
     desktop::{utils::*, PopupManager, Space},
-    utils::{Logical, Point, Rectangle},
+    utils::{Coordinate, Logical, Point, Rectangle, Size},
     wayland::{
-        compositor::with_states,
+        compositor::{self, with_states, TraversalAction},
         output::Output,
         shell::xdg::{SurfaceCachedState, ToplevelSurface},
     },
 };
 use std::{
-    cell::Cell,
+    cell::{Cell, RefCell},
     hash::{Hash, Hasher},
     rc::Rc,
 };
@@ -87,6 +90,7 @@ pub(super) struct WindowInner {
     toplevel: Kind,
     bbox: Cell<Rectangle<i32, Logical>>,
     user_data: UserDataMap,
+    size: Option<Size<i32, Logical>>,
 }
 
 impl Drop for WindowInner {
@@ -131,6 +135,11 @@ bitflags::bitflags! {
 impl Window {
     /// Construct a new [`Window`] from a given compatible toplevel surface
     pub fn new(toplevel: Kind) -> Window {
+        Window::new_with_size(toplevel, None)
+    }
+
+    /// Construct a new [`Window`] from a given compatible toplevel surface and a specified size
+    pub fn new_with_size(toplevel: Kind, size: Option<Size<i32, Logical>>) -> Window {
         let id = next_window_id();
 
         Window(Rc::new(WindowInner {
@@ -138,6 +147,7 @@ impl Window {
             toplevel,
             bbox: Cell::new(Rectangle::from_loc_and_size((0, 0), (0, 0))),
             user_data: UserDataMap::new(),
+            size,
         }))
     }
 
@@ -149,7 +159,18 @@ impl Window {
         };
         // It's the set geometry with the full bounding box as the fallback.
         with_states(surface, |states| {
-            states.cached_state.current::<SurfaceCachedState>().geometry
+            let surface_transform = surface_transform(states);
+            let geometry = states.cached_state.current::<SurfaceCachedState>().geometry;
+            geometry.and_then(|geo| {
+                geo.to_f64().intersection(surface_transform.crop).map(|mut geo| {
+                    geo.loc -= surface_transform.crop.loc;
+                    geo.loc.x = geo.loc.x.upscale(surface_transform.scale.w);
+                    geo.loc.y = geo.loc.y.upscale(surface_transform.scale.h);
+                    geo.size.w = geo.size.w.upscale(surface_transform.scale.w);
+                    geo.size.h = geo.size.h.upscale(surface_transform.scale.h);
+                    geo.to_i32_up()
+                })
+            })
         })
         .unwrap()
         .unwrap_or_else(|| self.bbox())
@@ -234,6 +255,81 @@ impl Window {
     /// to correctly update the bounding box of this window.
     pub fn refresh(&self) {
         if let Some(surface) = self.0.toplevel.get_surface() {
+            let surface_size = compositor::with_states(surface, |states| {
+                states
+                    .data_map
+                    .get::<RefCell<SurfaceState>>()
+                    .and_then(|s| s.borrow().surface_size())
+            })
+            .unwrap_or_default();
+
+            // let scale: Size<f64, Logical> = if let Some(surface_size) = surface_size {
+            //     let configured_size = self.0.size.unwrap_or(surface_size).to_f64();
+            //     let scale_x = configured_size.w / surface_size.w as f64;
+            //     let scale_y = configured_size.h / surface_size.h as f64;
+            //     Size::from((scale_x, scale_y))
+            // } else {
+            //     Size::from((1.0, 1.0))
+            // };
+
+            let scale = Size::from((1.0, 1.0));
+
+            let _ = compositor::with_states(surface, |states| {
+                states
+                    .data_map
+                    .insert_if_missing(|| RefCell::new(SurfaceTransform::default()));
+                states
+                    .data_map
+                    .get::<RefCell<SurfaceTransform>>()
+                    .unwrap()
+                    .borrow_mut()
+                    .set_crop(Rectangle::from_loc_and_size((100., 0.), (400., f64::MAX)));
+            });
+
+            compositor::with_surface_tree_downward(
+                surface,
+                (),
+                |_, _, _| TraversalAction::DoChildren(()),
+                |_, states, _| {
+                    states
+                        .data_map
+                        .insert_if_missing(|| RefCell::new(SurfaceTransform::default()));
+                    states
+                        .data_map
+                        .get::<RefCell<SurfaceTransform>>()
+                        .unwrap()
+                        .borrow_mut()
+                        .set_scale(scale);
+                },
+                |_, _, _| true,
+            );
+
+            for (popup, _) in PopupManager::popups_for_surface(surface)
+                .ok()
+                .into_iter()
+                .flatten()
+            {
+                if let Some(surface) = popup.get_surface() {
+                    compositor::with_surface_tree_downward(
+                        surface,
+                        (),
+                        |_, _, _| TraversalAction::DoChildren(()),
+                        |_, states, _| {
+                            states
+                                .data_map
+                                .insert_if_missing(|| RefCell::new(SurfaceTransform::default()));
+                            states
+                                .data_map
+                                .get::<RefCell<SurfaceTransform>>()
+                                .unwrap()
+                                .borrow_mut()
+                                .set_scale(scale);
+                        },
+                        |_, _, _| true,
+                    );
+                }
+            }
+
             self.0.bbox.set(bbox_from_surface_tree(surface, (0, 0)));
         }
     }
