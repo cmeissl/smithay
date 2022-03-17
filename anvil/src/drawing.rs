@@ -117,13 +117,13 @@ where
     ) -> Result<(), <R as Renderer>::Error> {
         frame.render_texture_at(
             &self.texture,
-            location.to_f64().to_physical(scale).to_i32_round(),
+            location.to_f64().to_physical(scale),
             1,
             scale as f64,
             Transform::Normal,
             &*damage
                 .iter()
-                .map(|rect| rect.to_f64().to_physical(scale).to_i32_round())
+                .map(|rect| rect.to_f64().to_physical(scale))
                 .collect::<Vec<_>>(),
             1.0,
         )?;
