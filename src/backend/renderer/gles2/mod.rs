@@ -1,6 +1,6 @@
 //! Implementation of the rendering traits using OpenGL ES 2
 
-use cgmath::{prelude::*, Matrix3, Vector2, Vector3};
+use cgmath::{prelude::*, Matrix3, Vector2};
 use core::slice;
 use std::{
     borrow::Cow,
@@ -16,6 +16,9 @@ use std::{
         mpsc::{channel, Receiver, Sender},
     },
 };
+
+#[cfg(feature = "wayland_frontend")]
+use std::{cell::RefCell, collections::HashMap};
 
 mod shaders;
 mod version;
@@ -57,12 +60,11 @@ crate::utils::ids::id_gen!(next_renderer_id, RENDERER_ID, RENDERER_IDS);
 struct Gles2TexProgram {
     program: ffi::types::GLuint,
     uniform_tex: ffi::types::GLint,
+    uniform_tex_matrix: ffi::types::GLint,
     uniform_matrix: ffi::types::GLint,
-    uniform_invert_y: ffi::types::GLint,
     uniform_alpha: ffi::types::GLint,
     attrib_vert: ffi::types::GLint,
-    attrib_position: ffi::types::GLint,
-    attrib_tex_coords: ffi::types::GLint,
+    attrib_vert_position: ffi::types::GLint,
 }
 
 #[derive(Debug, Clone)]
@@ -513,22 +515,21 @@ unsafe fn texture_program(gl: &ffi::Gles2, frag: &'static str) -> Result<Gles2Te
     let program = link_program(gl, shaders::VERTEX_SHADER, frag)?;
 
     let vert = CStr::from_bytes_with_nul(b"vert\0").expect("NULL terminated");
-    let position = CStr::from_bytes_with_nul(b"position\0").expect("NULL terminated");
-    let tex_coords = CStr::from_bytes_with_nul(b"tex_coords\0").expect("NULL terminated");
+    let vert_position = CStr::from_bytes_with_nul(b"vert_position\0").expect("NULL terminated");
     let tex = CStr::from_bytes_with_nul(b"tex\0").expect("NULL terminated");
     let matrix = CStr::from_bytes_with_nul(b"matrix\0").expect("NULL terminated");
-    let invert_y = CStr::from_bytes_with_nul(b"invert_y\0").expect("NULL terminated");
+    let tex_matrix = CStr::from_bytes_with_nul(b"tex_matrix\0").expect("NULL terminated");
     let alpha = CStr::from_bytes_with_nul(b"alpha\0").expect("NULL terminated");
 
     Ok(Gles2TexProgram {
         program,
         uniform_tex: gl.GetUniformLocation(program, tex.as_ptr() as *const ffi::types::GLchar),
         uniform_matrix: gl.GetUniformLocation(program, matrix.as_ptr() as *const ffi::types::GLchar),
-        uniform_invert_y: gl.GetUniformLocation(program, invert_y.as_ptr() as *const ffi::types::GLchar),
+        uniform_tex_matrix: gl.GetUniformLocation(program, tex_matrix.as_ptr() as *const ffi::types::GLchar),
         uniform_alpha: gl.GetUniformLocation(program, alpha.as_ptr() as *const ffi::types::GLchar),
         attrib_vert: gl.GetAttribLocation(program, vert.as_ptr() as *const ffi::types::GLchar),
-        attrib_position: gl.GetAttribLocation(program, position.as_ptr() as *const ffi::types::GLchar),
-        attrib_tex_coords: gl.GetAttribLocation(program, tex_coords.as_ptr() as *const ffi::types::GLchar),
+        attrib_vert_position: gl
+            .GetAttribLocation(program, vert_position.as_ptr() as *const ffi::types::GLchar),
     })
 }
 
@@ -652,7 +653,7 @@ impl Gles2Renderer {
         };
 
         let mut vbos = [0; 2];
-        gl.GenBuffers(2, vbos.as_mut_ptr());
+        gl.GenBuffers(vbos.len() as i32, vbos.as_mut_ptr());
         gl.BindBuffer(ffi::ARRAY_BUFFER, vbos[0]);
         gl.BufferData(
             ffi::ARRAY_BUFFER,
@@ -692,7 +693,7 @@ impl Gles2Renderer {
         Ok(renderer)
     }
 
-    pub(crate) fn make_current(&self) -> Result<(), MakeCurrentError> {
+    pub(crate) fn make_current(&mut self) -> Result<(), MakeCurrentError> {
         unsafe {
             if let Some(&Gles2Target::Surface(ref surface)) = self.target.as_ref() {
                 self.egl.make_current_with_surface(&**surface)?;
@@ -712,11 +713,12 @@ impl Gles2Renderer {
                 }
             }
         }
+        // delayed destruction until the next frame rendering.
+        self.cleanup();
         Ok(())
     }
 
-    fn cleanup(&mut self) -> Result<(), Gles2Error> {
-        self.make_current()?;
+    fn cleanup(&mut self) {
         #[cfg(feature = "wayland_frontend")]
         self.dmabuf_cache.retain(|entry, _tex| entry.upgrade().is_some());
         // Free outdated buffer resources
@@ -758,7 +760,6 @@ impl Gles2Renderer {
                 },
             }
         }
-        Ok(())
     }
 }
 
@@ -771,6 +772,10 @@ impl ImportMemWl for Gles2Renderer {
         damage: &[Rectangle<i32, Buffer>],
     ) -> Result<Gles2Texture, Gles2Error> {
         use crate::wayland::shm::with_buffer_contents;
+
+        // why not store a `Gles2Texture`? because the user might do so.
+        // this is guaranteed a non-public internal type, so we are good.
+        type CacheMap = HashMap<usize, Rc<Gles2TextureInternal>>;
 
         with_buffer_contents(buffer, |slice, data| {
             self.make_current()?;
@@ -797,11 +802,21 @@ impl ImportMemWl for Gles2Renderer {
 
             let mut upload_full = false;
 
+            let id = self.id();
             let texture = Gles2Texture(
-                // why not store a `Gles2Texture`? because the user might do so.
-                // this is guaranteed a non-public internal type, so we are good.
                 surface
-                    .and_then(|surface| surface.data_map.get::<Rc<Gles2TextureInternal>>().cloned())
+                    .and_then(|surface| {
+                        surface
+                            .data_map
+                            .insert_if_missing(|| Rc::new(RefCell::new(CacheMap::new())));
+                        surface
+                            .data_map
+                            .get::<Rc<RefCell<CacheMap>>>()
+                            .unwrap()
+                            .borrow()
+                            .get(&id)
+                            .cloned()
+                    })
                     .filter(|texture| texture.size == (width, height).into())
                     .unwrap_or_else(|| {
                         let mut tex = 0;
@@ -819,7 +834,12 @@ impl ImportMemWl for Gles2Renderer {
                         });
                         if let Some(surface) = surface {
                             let copy = new.clone();
-                            surface.data_map.insert_if_missing(|| copy);
+                            surface
+                                .data_map
+                                .get::<Rc<RefCell<CacheMap>>>()
+                                .unwrap()
+                                .borrow_mut()
+                                .insert(id, copy);
                         }
                         new
                     }),
@@ -1060,10 +1080,9 @@ impl ImportDma for Gles2Renderer {
             return Err(Gles2Error::GLExtensionNotSupported(&["GL_OES_EGL_image"]));
         }
 
+        self.make_current()?;
         self.existing_dmabuf_texture(buffer)?.map(Ok).unwrap_or_else(|| {
             let is_external = !self.egl.dmabuf_render_formats().contains(&buffer.format());
-
-            self.make_current()?;
             let image = self
                 .egl
                 .display
@@ -1113,7 +1132,6 @@ impl Gles2Renderer {
                     if egl_images[0] == ffi_egl::NO_IMAGE_KHR {
                         return Ok(None);
                     }
-                    self.make_current()?;
                     let tex = Some(texture.0.texture);
                     self.import_egl_image(egl_images[0], false, tex)?;
                 }
@@ -1482,6 +1500,7 @@ impl Bind<Dmabuf> for Gles2Renderer {
             })?;
 
         self.target = Some(Gles2Target::Image { buf, dmabuf });
+        self.make_current()?;
         Ok(())
     }
 
@@ -1520,6 +1539,7 @@ impl Bind<Gles2Texture> for Gles2Renderer {
             destruction_callback_sender: self.destruction_callback_sender.clone(),
             fbo,
         });
+        self.make_current()?;
 
         Ok(())
     }
@@ -1580,6 +1600,7 @@ impl Bind<Gles2Renderbuffer> for Gles2Renderer {
             buf: renderbuffer,
             fbo,
         });
+        self.make_current()?;
 
         Ok(())
     }
@@ -1625,7 +1646,7 @@ impl Drop for Gles2Renderer {
                     self.gl.DeleteProgram(program.program);
                 }
                 self.gl.DeleteProgram(self.solid_program.program);
-                self.gl.DeleteBuffers(2, self.vbos.as_ptr());
+                self.gl.DeleteBuffers(self.vbos.len() as i32, self.vbos.as_ptr());
 
                 if self.extensions.iter().any(|ext| ext == "GL_KHR_debug") {
                     self.gl.Disable(ffi::DEBUG_OUTPUT);
@@ -1701,8 +1722,6 @@ impl Renderer for Gles2Renderer {
         F: FnOnce(&mut Self, &mut Self::Frame) -> R,
     {
         self.make_current()?;
-        // delayed destruction until the next frame rendering.
-        self.cleanup()?;
 
         unsafe {
             self.gl.Viewport(0, 0, size.w, size.h);
@@ -1825,7 +1844,7 @@ impl Frame for Gles2Frame {
     type Error = Gles2Error;
     type TextureId = Gles2Texture;
 
-    fn clear(&mut self, color: [f32; 4], at: &[Rectangle<i32, Physical>]) -> Result<(), Self::Error> {
+    fn clear(&mut self, color: [f32; 4], at: &[Rectangle<f64, Physical>]) -> Result<(), Self::Error> {
         if at.is_empty() {
             return Ok(());
         }
@@ -1948,69 +1967,77 @@ impl Frame for Gles2Frame {
     fn render_texture_from_to(
         &mut self,
         texture: &Self::TextureId,
-        src: Rectangle<i32, Buffer>,
+        src: Rectangle<f64, Buffer>,
         dest: Rectangle<f64, Physical>,
-        damage: &[Rectangle<i32, Buffer>],
+        damage: &[Rectangle<f64, Physical>],
         transform: Transform,
         alpha: f32,
     ) -> Result<(), Self::Error> {
         let mut mat = Matrix3::<f32>::identity();
 
-        // position and scale
+        // dest position and scale
         mat = mat * Matrix3::from_translation(Vector2::new(dest.loc.x as f32, dest.loc.y as f32));
         mat = mat * Matrix3::from_nonuniform_scale(dest.size.w as f32, dest.size.h as f32);
 
-        //apply surface transformation
-        mat = mat * Matrix3::from_translation(Vector2::new(0.5, 0.5));
+        // src scale, position, tranform and y_inverted
+        let tex_size = texture.size().to_f64();
+        let src_size = src.size;
+
+        let transform_mat = if transform.flipped() {
+            transform.matrix()
+        } else {
+            transform.invert().matrix()
+        };
+
+        let mut tex_mat = Matrix3::<f32>::identity();
+        // first scale to meet the src size
+        tex_mat = tex_mat
+            * Matrix3::from_nonuniform_scale(
+                (src_size.w / tex_size.w) as f32,
+                (src_size.h / tex_size.h) as f32,
+            );
+        // now translate by the src location
+        tex_mat = tex_mat
+            * Matrix3::from_translation(Vector2::new(
+                (src.loc.x / src_size.w) as f32,
+                (src.loc.y / src_size.h) as f32,
+            ));
+        // at last apply the transform and if necessary invert the y axis
+        tex_mat = tex_mat * Matrix3::from_translation(Vector2::new(0.5, 0.5));
         if transform == Transform::Normal {
-            assert_eq!(mat, mat * transform.invert().matrix());
+            assert_eq!(tex_mat, tex_mat * transform.invert().matrix());
             assert_eq!(transform.matrix(), Matrix3::<f32>::identity());
         }
-        mat = mat * transform.matrix();
-        mat = mat * Matrix3::from_translation(Vector2::new(-0.5, -0.5));
+        tex_mat = tex_mat * transform_mat;
+        if texture.0.y_inverted {
+            tex_mat = tex_mat * Matrix3::new(1.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0);
+        }
+        tex_mat = tex_mat * Matrix3::from_translation(Vector2::new(-0.5, -0.5));
 
-        // this matrix should be regular, we can expect invert to succeed
-        let tex_size = texture.size();
-        let texture_mat = Matrix3::from_nonuniform_scale(tex_size.w as f32, tex_size.h as f32)
-            .invert()
-            .unwrap();
-        let tex_verts = [
-            (texture_mat * Vector3::new((src.loc.x + src.size.w) as f32, src.loc.y as f32, 0.0)).truncate(), // top-right
-            (texture_mat * Vector3::new(src.loc.x as f32, src.loc.y as f32, 0.0)).truncate(), // top-left
-            (texture_mat
-                * Vector3::new(
-                    (src.loc.x + src.size.w) as f32,
-                    (src.loc.y + src.size.h) as f32,
-                    0.0,
-                ))
-            .truncate(), // bottom-right
-            (texture_mat * Vector3::new(src.loc.x as f32, (src.loc.y + src.size.h) as f32, 0.0)).truncate(), // bottom-left
-        ];
-
-        let damage = damage
+        let instances = damage
             .iter()
             .flat_map(|rect| {
-                let src = src.size.to_f64();
-                let rect = rect.to_f64();
+                let dest_size = dest.size;
 
                 let rect_constrained_loc = rect
                     .loc
-                    .constrain(Rectangle::from_extemities((0f64, 0f64), src.to_point()));
-                let rect_clamped_size = rect
-                    .size
-                    .clamp((0f64, 0f64), (src.to_point() - rect_constrained_loc).to_size());
+                    .constrain(Rectangle::from_extemities((0f64, 0f64), dest_size.to_point()));
+                let rect_clamped_size = rect.size.clamp(
+                    (0f64, 0f64),
+                    (dest_size.to_point() - rect_constrained_loc).to_size(),
+                );
 
                 let rect = Rectangle::from_loc_and_size(rect_constrained_loc, rect_clamped_size);
                 [
-                    (rect.loc.x / src.w) as f32,
-                    (rect.loc.y / src.h) as f32,
-                    (rect.size.w / src.w) as f32,
-                    (rect.size.h / src.h) as f32,
+                    (rect.loc.x / dest_size.w) as f32,
+                    (rect.loc.y / dest_size.h) as f32,
+                    (rect.size.w / dest_size.w) as f32,
+                    (rect.size.h / dest_size.h) as f32,
                 ]
             })
             .collect::<Vec<_>>();
 
-        self.render_texture(texture, mat, Some(&damage), tex_verts, alpha)
+        self.render_texture(texture, tex_mat, mat, Some(&instances), alpha)
     }
 
     fn transformation(&self) -> Transform {
@@ -2020,13 +2047,23 @@ impl Frame for Gles2Frame {
 
 impl Gles2Frame {
     /// Render a texture to the current target using given projection matrix and alpha.
-    /// The given vertices are used to source the texture. This is mostly useful for cropping the texture.
+    ///  
+    /// The instances are used to define the regions which should get drawn.
+    /// Each instance has to define 4 [`GLfloat`](ffi::types::GLfloat) which define the
+    /// relative offset and scale for the vertex position and range from `0.0` to `1.0`.
+    /// The first 2 [`GLfloat`](ffi::types::GLfloat) define the relative x and y offset.
+    /// The remaining 2 [`GLfloat`](ffi::types::GLfloat) define the x and y scale.
+    /// This can be used to only update parts of the texture on screen.
+    ///
+    /// The given texture matrix is used to transform the instances into texture coordinates.
+    /// In case the texture is rotated, flipped or y-inverted the matrix has to be set up accordingly.
+    /// Additionally the matrix can be used to crop the texture.
     pub fn render_texture(
         &mut self,
         tex: &Gles2Texture,
+        tex_matrix: Matrix3<f32>,
         mut matrix: Matrix3<f32>,
         instances: Option<&[ffi::types::GLfloat]>,
-        tex_coords: [Vector2<f32>; 4],
         alpha: f32,
     ) -> Result<(), Gles2Error> {
         let damage = instances.unwrap_or(&[0.0, 0.0, 1.0, 1.0]);
@@ -2073,45 +2110,14 @@ impl Gles2Frame {
                 ffi::FALSE,
                 matrix.as_ptr(),
             );
-            self.gl.Uniform1i(
-                self.tex_programs[tex.0.texture_kind].uniform_invert_y,
-                if tex.0.y_inverted { 1 } else { 0 },
+            self.gl.UniformMatrix3fv(
+                self.tex_programs[tex.0.texture_kind].uniform_tex_matrix,
+                1,
+                ffi::FALSE,
+                tex_matrix.as_ptr(),
             );
             self.gl
                 .Uniform1f(self.tex_programs[tex.0.texture_kind].uniform_alpha, alpha);
-
-            // Create all required texture vertices.
-            let tex_verts: Cow<'_, [Vector2<ffi::types::GLfloat>]> = if self.supports_instancing {
-                Cow::Borrowed(&tex_coords)
-            } else {
-                let tex_verts = [
-                    // Top left.
-                    tex_coords[1],
-                    // Bottom left.
-                    tex_coords[3],
-                    // Bottom right.
-                    tex_coords[2],
-                    // Top left.
-                    tex_coords[1],
-                    // Bottom right.
-                    tex_coords[2],
-                    // Top right.
-                    tex_coords[0],
-                ];
-                Cow::Owned(tex_verts.repeat(damage.len() / 4))
-            };
-
-            self.gl
-                .EnableVertexAttribArray(self.tex_programs[tex.0.texture_kind].attrib_tex_coords as u32);
-            self.gl.VertexAttribPointer(
-                self.tex_programs[tex.0.texture_kind].attrib_tex_coords as u32,
-                2,
-                ffi::FLOAT,
-                ffi::FALSE,
-                0,
-                // cgmath::Vector2 is marked as repr(C), so this cast should be safe
-                tex_verts.as_ptr() as *const _,
-            );
 
             self.gl
                 .EnableVertexAttribArray(self.tex_programs[tex.0.texture_kind].attrib_vert as u32);
@@ -2139,8 +2145,9 @@ impl Gles2Frame {
                 Cow::Owned(vertices)
             };
 
+            // vert_position
             self.gl
-                .EnableVertexAttribArray(self.tex_programs[tex.0.texture_kind].attrib_position as u32);
+                .EnableVertexAttribArray(self.tex_programs[tex.0.texture_kind].attrib_vert_position as u32);
             self.gl.BindBuffer(ffi::ARRAY_BUFFER, self.vbos[1]);
             self.gl.BufferData(
                 ffi::ARRAY_BUFFER,
@@ -2150,7 +2157,7 @@ impl Gles2Frame {
             );
 
             self.gl.VertexAttribPointer(
-                self.tex_programs[tex.0.texture_kind].attrib_position as u32,
+                self.tex_programs[tex.0.texture_kind].attrib_vert_position as u32,
                 4,
                 ffi::FLOAT,
                 ffi::FALSE,
@@ -2162,10 +2169,10 @@ impl Gles2Frame {
             if self.supports_instancing {
                 self.gl
                     .VertexAttribDivisor(self.tex_programs[tex.0.texture_kind].attrib_vert as u32, 0);
-                self.gl
-                    .VertexAttribDivisor(self.tex_programs[tex.0.texture_kind].attrib_tex_coords as u32, 0);
-                self.gl
-                    .VertexAttribDivisor(self.tex_programs[tex.0.texture_kind].attrib_position as u32, 1);
+                self.gl.VertexAttribDivisor(
+                    self.tex_programs[tex.0.texture_kind].attrib_vert_position as u32,
+                    1,
+                );
 
                 self.gl.DrawArraysInstanced(ffi::TRIANGLE_STRIP, 0, 4, damage_len);
             } else {
@@ -2193,11 +2200,9 @@ impl Gles2Frame {
             self.gl.BindBuffer(ffi::ARRAY_BUFFER, 0);
             self.gl.BindTexture(target, 0);
             self.gl
-                .DisableVertexAttribArray(self.tex_programs[tex.0.texture_kind].attrib_tex_coords as u32);
-            self.gl
                 .DisableVertexAttribArray(self.tex_programs[tex.0.texture_kind].attrib_vert as u32);
             self.gl
-                .DisableVertexAttribArray(self.tex_programs[tex.0.texture_kind].attrib_position as u32);
+                .DisableVertexAttribArray(self.tex_programs[tex.0.texture_kind].attrib_vert_position as u32);
         }
 
         Ok(())

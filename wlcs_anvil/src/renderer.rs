@@ -124,16 +124,16 @@ impl Frame for DummyFrame {
     type Error = SwapBuffersError;
     type TextureId = DummyTexture;
 
-    fn clear(&mut self, _color: [f32; 4], _damage: &[Rectangle<i32, Physical>]) -> Result<(), Self::Error> {
+    fn clear(&mut self, _color: [f32; 4], _damage: &[Rectangle<f64, Physical>]) -> Result<(), Self::Error> {
         Ok(())
     }
 
     fn render_texture_from_to(
         &mut self,
         _texture: &Self::TextureId,
-        _src: Rectangle<i32, Buffer>,
+        _src: Rectangle<f64, Buffer>,
         _dst: Rectangle<f64, Physical>,
-        _damage: &[Rectangle<i32, Buffer>],
+        _damage: &[Rectangle<f64, Physical>],
         _src_transform: Transform,
         _alpha: f32,
     ) -> Result<(), Self::Error> {

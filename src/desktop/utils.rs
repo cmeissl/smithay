@@ -3,11 +3,11 @@
 use crate::{
     backend::renderer::utils::SurfaceState,
     desktop::Space,
-    utils::{Logical, Point, Rectangle},
+    utils::{Coordinate, Logical, Point, Rectangle, Size},
     wayland::{
         compositor::{
-            with_surface_tree_downward, with_surface_tree_upward, Damage, SubsurfaceCachedState,
-            SurfaceAttributes, TraversalAction,
+            with_surface_tree_downward, with_surface_tree_upward, SubsurfaceCachedState, SurfaceAttributes,
+            SurfaceData, TraversalAction,
         },
         output::Output,
     },
@@ -17,6 +17,112 @@ use wayland_server::protocol::wl_surface;
 use std::cell::RefCell;
 
 use super::WindowSurfaceType;
+
+pub(crate) fn surface_transform(states: &SurfaceData) -> SurfaceTransform {
+    states
+        .data_map
+        .get::<RefCell<SurfaceTransform>>()
+        .map(|t| *t.borrow())
+        .unwrap_or_default()
+}
+
+/// A transform that can be attached
+/// to a surface.
+#[derive(Copy, Clone, Debug)]
+pub struct SurfaceTransform {
+    pub(crate) scale: Size<f64, Logical>,
+    pub(crate) crop: Rectangle<f64, Logical>,
+}
+
+// TODO: The functions are wrong after refactoring...
+impl SurfaceTransform {
+    /// Set the scale of the transform
+    pub fn set_scale<S: Into<Size<f64, Logical>>>(&mut self, scale: S) {
+        self.scale = scale.into();
+    }
+
+    /// Set the crop of the transform
+    pub fn set_crop(&mut self, crop: Rectangle<f64, Logical>) {
+        self.crop = crop;
+    }
+
+    /// Transform a point
+    pub fn apply_point<N: Coordinate>(&self, point: Point<N, Logical>) -> Point<f64, Logical> {
+        let mut point = point.to_f64();
+        // First move the point by the crop
+        let crop_loc = self.crop.loc;
+        point.x = (point.x - crop_loc.x).max(0.0);
+        point.y = (point.y - crop_loc.y).max(0.0);
+        // Then scale the point
+        point.x = point.x.upscale(self.scale.w);
+        point.y = point.y.upscale(self.scale.h);
+        point
+    }
+
+    /// Transform a point
+    pub fn revert_point<N: Coordinate>(&self, point: Point<N, Logical>) -> Point<f64, Logical> {
+        let mut point = point.to_f64();
+        let crop = self.crop.loc;
+        point.x = point.x.downscale(self.scale.w) + crop.x;
+        point.y = point.y.downscale(self.scale.h) + crop.y;
+        point
+    }
+
+    /// Transform a rect
+    pub fn apply_rect<N: Coordinate>(&self, rect: Rectangle<N, Logical>) -> Rectangle<f64, Logical> {
+        let rect = rect.to_f64();
+
+        let crop = self.crop.loc;
+        let loc = Point::<f64, Logical>::from((
+            (rect.loc.x - crop.x).upscale(self.scale.w),
+            (rect.loc.y - crop.y).upscale(self.scale.h),
+        ));
+        let size = Size::<f64, Logical>::from((
+            rect.size.w.upscale(self.scale.w),
+            rect.size.h.upscale(self.scale.h),
+        ));
+
+        Rectangle::from_loc_and_size(loc, size)
+    }
+
+    /// Transform a rect
+    pub fn revert_rect<N: Coordinate>(&self, rect: Rectangle<N, Logical>) -> Rectangle<f64, Logical> {
+        let rect = rect.to_f64();
+
+        let crop = self.crop.loc;
+        let loc = Point::<f64, Logical>::from((
+            rect.loc.x.downscale(self.scale.w) + crop.x,
+            rect.loc.y.downscale(self.scale.h) + crop.y,
+        ));
+        let size = Size::<f64, Logical>::from((
+            rect.size.w.downscale(self.scale.w),
+            rect.size.h.downscale(self.scale.h),
+        ));
+
+        Rectangle::from_loc_and_size(loc, size)
+    }
+
+    /// Transform a size
+    pub fn apply_size<N: Coordinate>(&self, size: Size<N, Logical>) -> Size<f64, Logical> {
+        let size = size.to_f64();
+        Size::from((size.w.upscale(self.scale.w), size.h.upscale(self.scale.h)))
+    }
+
+    /// Transform a size
+    pub fn revert_size<N: Coordinate>(&self, size: Size<N, Logical>) -> Size<f64, Logical> {
+        let size = size.to_f64();
+        Size::from((size.w.downscale(self.scale.w), size.h.downscale(self.scale.h)))
+    }
+}
+
+impl Default for SurfaceTransform {
+    fn default() -> Self {
+        Self {
+            scale: Size::from((1.0, 1.0)),
+            crop: Rectangle::from_extemities((0., 0.), (f64::MAX, f64::MAX)),
+        }
+    }
+}
 
 impl SurfaceState {
     fn contains_point<P: Into<Point<f64, Logical>>>(&self, attrs: &SurfaceAttributes, point: P) -> bool {
@@ -58,25 +164,82 @@ pub fn bbox_from_surface_tree<P>(surface: &wl_surface::WlSurface, location: P) -
 where
     P: Into<Point<i32, Logical>>,
 {
-    let location = location.into();
+    let location: Point<i32, Logical> = location.into();
     let mut bounding_box = Rectangle::from_loc_and_size(location, (0, 0));
+    let parent_surface_transform = SurfaceTransform::default();
+
     with_surface_tree_downward(
         surface,
-        location,
-        |_, states, loc: &Point<i32, Logical>| {
+        (location, parent_surface_transform),
+        |_, states, (loc, parent_surface_transform)| {
             let mut loc = *loc;
             let data = states.data_map.get::<RefCell<SurfaceState>>();
 
             if let Some(size) = data.and_then(|d| d.borrow().surface_size()) {
+                let mut surface_transform = surface_transform(states);
+
                 if states.role == Some("subsurface") {
                     let current = states.cached_state.current::<SubsurfaceCachedState>();
-                    loc += current.location;
+                    let current_location = current.location.to_f64();
+                    // When we subtract the crop location we will receive either something positive,
+                    // which is our new corrected location or something negative in which case we need to
+                    // also crop ourself and set the corrected location to zero.
+                    let parent_crop_loc = parent_surface_transform.crop.loc;
+                    let temp = current_location - parent_crop_loc;
+
+                    let (subsurface_x_crop, subsurface_x_location) = if temp.x.is_sign_negative() {
+                        (temp.x.abs(), 0.0)
+                    } else {
+                        (0.0, temp.x)
+                    };
+
+                    let (subsurface_y_crop, subsurface_y_location) = if temp.y.is_sign_negative() {
+                        (temp.y.abs(), 0.0)
+                    } else {
+                        (0.0, temp.y)
+                    };
+                    // Now apply the scaling to the location
+                    let corrected_subsurface_location = Point::<f64, Logical>::from((
+                        subsurface_x_location.upscale(parent_surface_transform.scale.w),
+                        subsurface_y_location.upscale(parent_surface_transform.scale.h),
+                    ));
+
+                    loc += corrected_subsurface_location.to_i32_floor();
+
+                    // Now we need to calculate the crop for our subsurfaces
+                    let mut parent_crop_size = parent_surface_transform.crop.size;
+                    // Correct the size so that the subsurface crop can not extend over
+                    // the parent crop. Note: Do not use the scaled subsurface location here!
+                    parent_crop_size.w -= subsurface_x_location;
+                    parent_crop_size.h -= subsurface_y_location;
+                    let subsurface_crop = Rectangle::<f64, Logical>::from_loc_and_size(
+                        (subsurface_x_crop, subsurface_y_crop),
+                        parent_crop_size,
+                    );
+
+                    // TODO: Now check if we also define a surface local crop, if yes restrict
+                    // the  subsurface_crop by the surface local crop. In case the crops do not
+                    // intersect the surface will not be visible.
+                    let crop_intersection = surface_transform
+                        .crop
+                        .intersection(subsurface_crop)
+                        .unwrap_or_default();
+
+                    surface_transform.crop = crop_intersection;
                 }
 
-                // Update the bounding box.
-                bounding_box = bounding_box.merge(Rectangle::from_loc_and_size(loc, size));
-
-                TraversalAction::DoChildren(loc)
+                let surface_bbox = Rectangle::from_loc_and_size((0.0, 0.0), size.to_f64());
+                if let Some(mut bbox) = surface_bbox.intersection(surface_transform.crop) {
+                    bbox.loc -= surface_transform.crop.loc;
+                    bbox.loc.x = bbox.loc.x.upscale(surface_transform.scale.w);
+                    bbox.loc.y = bbox.loc.y.upscale(surface_transform.scale.h);
+                    bbox.size.w = bbox.size.w.upscale(surface_transform.scale.w);
+                    bbox.size.h = bbox.size.h.upscale(surface_transform.scale.h);
+                    bbox.loc += loc.to_f64();
+                    // Update the bounding box.
+                    bounding_box = bounding_box.merge(bbox.to_i32_up());
+                }
+                TraversalAction::DoChildren((loc, surface_transform))
             } else {
                 // If the parent surface is unmapped, then the child surfaces are hidden as
                 // well, no need to consider them here.
@@ -94,7 +257,8 @@ where
 /// - `location` can be set to offset the returned bounding box.
 /// - if a `key` is set the damage is only returned on the first call with the given key values.
 ///   Subsequent calls will return an empty vector until the buffer is updated again and new
-///   damage values may be retrieved.
+///   damage values may be retrieved. Additionally damage may be internally accumulated, if
+///   multiple commits occurred between different calls.
 pub fn damage_from_surface_tree<P>(
     surface: &wl_surface::WlSurface,
     location: P,
@@ -107,56 +271,171 @@ where
 
     let mut damage = Vec::new();
     let key = key.map(|x| SpaceOutputTuple::from(x).owned_hash());
+    let parent_surface_transform = SurfaceTransform::default();
+    let location: Point<i32, Logical> = location.into();
+
     with_surface_tree_upward(
         surface,
-        location.into(),
-        |_surface, states, location| {
+        (location, parent_surface_transform),
+        |_surface, states, (location, parent_surface_transform)| {
             let mut location = *location;
+            let mut surface_transform = surface_transform(states);
             if let Some(data) = states.data_map.get::<RefCell<SurfaceState>>() {
                 let data = data.borrow();
                 if key
                     .as_ref()
-                    .map(|key| !data.damage_seen.contains(key))
+                    .map(|key| data.space_seen.get(key).copied().unwrap_or(0) < data.commit_count)
                     .unwrap_or(true)
                     && states.role == Some("subsurface")
                 {
                     let current = states.cached_state.current::<SubsurfaceCachedState>();
-                    location += current.location;
+                    let current_location = current.location.to_f64();
+                    // When we subtract the crop location we will receive either something positive,
+                    // which is our new corrected location or something negative in which case we need to
+                    // also crop ourself and set the corrected location to zero.
+                    let parent_crop_loc = parent_surface_transform.crop.loc;
+                    let temp = current_location - parent_crop_loc;
+
+                    let (subsurface_x_crop, subsurface_x_location) = if temp.x.is_sign_negative() {
+                        (temp.x.abs(), 0.0)
+                    } else {
+                        (0.0, temp.x)
+                    };
+
+                    let (subsurface_y_crop, subsurface_y_location) = if temp.y.is_sign_negative() {
+                        (temp.y.abs(), 0.0)
+                    } else {
+                        (0.0, temp.y)
+                    };
+                    // Now apply the scaling to the location
+                    let corrected_subsurface_location = Point::<f64, Logical>::from((
+                        subsurface_x_location.upscale(parent_surface_transform.scale.w),
+                        subsurface_y_location.upscale(parent_surface_transform.scale.h),
+                    ));
+
+                    location += corrected_subsurface_location.to_i32_floor();
+
+                    // Now we need to calculate the crop for our subsurfaces
+                    let mut parent_crop_size = parent_surface_transform.crop.size;
+                    // Correct the size so that the subsurface crop can not extend over
+                    // the parent crop. Note: Do not use the scaled subsurface location here!
+                    parent_crop_size.w -= subsurface_x_location;
+                    parent_crop_size.h -= subsurface_y_location;
+                    let subsurface_crop = Rectangle::<f64, Logical>::from_loc_and_size(
+                        (subsurface_x_crop, subsurface_y_crop),
+                        parent_crop_size,
+                    );
+
+                    // TODO: Now check if we also define a surface local crop, if yes restrict
+                    // the  subsurface_crop by the surface local crop. In case the crops do not
+                    // intersect the surface will not be visible.
+                    let crop_intersection = surface_transform
+                        .crop
+                        .intersection(subsurface_crop)
+                        .unwrap_or_default();
+
+                    surface_transform.crop = crop_intersection;
                 }
             }
-            TraversalAction::DoChildren(location)
+            // TODO: Inherit/Correct scale from parent and local transform
+            TraversalAction::DoChildren((location, surface_transform))
         },
-        |_surface, states, location| {
+        |_surface, states, (location, parent_surface_transform)| {
             let mut location = *location;
             if let Some(data) = states.data_map.get::<RefCell<SurfaceState>>() {
                 let mut data = data.borrow_mut();
-                let attributes = states.cached_state.current::<SurfaceAttributes>();
-
                 if key
                     .as_ref()
-                    .map(|key| !data.damage_seen.contains(key))
+                    .map(|key| data.space_seen.get(key).copied().unwrap_or(0) < data.commit_count)
                     .unwrap_or(true)
                 {
+                    let mut surface_transform = surface_transform(states);
+
+                    // we need to re-extract the subsurface offset, as the previous closure
+                    // only passes it to our children
                     if states.role == Some("subsurface") {
                         let current = states.cached_state.current::<SubsurfaceCachedState>();
-                        location += current.location;
-                    }
+                        let current_location = current.location.to_f64();
+                        // When we subtract the crop location we will receive either something positive,
+                        // which is our new corrected location or something negative in which case we need to
+                        // also crop ourself and set the corrected location to zero.
+                        let parent_crop_loc = parent_surface_transform.crop.loc;
+                        let temp = current_location - parent_crop_loc;
 
-                    damage.extend(attributes.damage.iter().map(|dmg| {
-                        let mut rect = match dmg {
-                            Damage::Buffer(rect) => rect.to_logical(
-                                attributes.buffer_scale,
-                                attributes.buffer_transform.into(),
-                                &data.buffer_dimensions.unwrap(),
-                            ),
-                            Damage::Surface(rect) => *rect,
+                        let (subsurface_x_crop, subsurface_x_location) = if temp.x.is_sign_negative() {
+                            (temp.x.abs(), 0.0)
+                        } else {
+                            (0.0, temp.x)
                         };
-                        rect.loc += location;
-                        rect
+
+                        let (subsurface_y_crop, subsurface_y_location) = if temp.y.is_sign_negative() {
+                            (temp.y.abs(), 0.0)
+                        } else {
+                            (0.0, temp.y)
+                        };
+                        // Now apply the scaling to the location
+                        let corrected_subsurface_location = Point::<f64, Logical>::from((
+                            subsurface_x_location.upscale(parent_surface_transform.scale.w),
+                            subsurface_y_location.upscale(parent_surface_transform.scale.h),
+                        ));
+
+                        location += corrected_subsurface_location.to_i32_floor();
+
+                        // Now we need to calculate the crop for our subsurfaces
+                        let mut parent_crop_size = parent_surface_transform.crop.size;
+                        // Correct the size so that the subsurface crop can not extend over
+                        // the parent crop. Note: Do not use the scaled subsurface location here!
+                        parent_crop_size.w -= subsurface_x_location;
+                        parent_crop_size.h -= subsurface_y_location;
+                        let subsurface_crop = Rectangle::<f64, Logical>::from_loc_and_size(
+                            (subsurface_x_crop, subsurface_y_crop),
+                            parent_crop_size,
+                        );
+
+                        // TODO: Now check if we also define a surface local crop, if yes restrict
+                        // the  subsurface_crop by the surface local crop. In case the crops do not
+                        // intersect the surface will not be visible.
+                        let crop_intersection = surface_transform
+                            .crop
+                            .intersection(subsurface_crop)
+                            .unwrap_or_default();
+
+                        surface_transform.crop = crop_intersection;
+                    }
+                    let new_damage = key
+                        .as_ref()
+                        .map(|key| data.damage_since(data.space_seen.get(key).copied()))
+                        .unwrap_or_else(|| {
+                            data.damage.front().cloned().unwrap_or_else(|| {
+                                data.buffer_dimensions
+                                    .as_ref()
+                                    .map(|size| vec![Rectangle::from_loc_and_size((0, 0), *size)])
+                                    .unwrap_or_else(Vec::new)
+                            })
+                        });
+
+                    damage.extend(new_damage.into_iter().flat_map(|rect| {
+                        rect.to_logical(
+                            data.buffer_scale,
+                            data.buffer_transform,
+                            &data.buffer_dimensions.unwrap(),
+                        )
+                        .to_f64()
+                        .intersection(surface_transform.crop)
+                        .map(|mut damage| {
+                            damage.loc -= surface_transform.crop.loc;
+                            damage.loc.x = damage.loc.x.upscale(surface_transform.scale.w);
+                            damage.loc.y = damage.loc.y.upscale(surface_transform.scale.h);
+                            damage.size.w = damage.size.w.upscale(surface_transform.scale.w);
+                            damage.size.h = damage.size.h.upscale(surface_transform.scale.h);
+                            damage.loc += location.to_f64();
+                            damage.to_i32_up()
+                        })
                     }));
 
                     if let Some(key) = key {
-                        data.damage_seen.insert(key);
+                        let current_commit = data.commit_count;
+                        data.space_seen.insert(key, current_commit);
                     }
                 }
             }
@@ -180,23 +459,31 @@ where
     P: Into<Point<i32, Logical>>,
 {
     let found = RefCell::new(None);
+    let parent_surface_transform = SurfaceTransform::default();
+    let location: Point<i32, Logical> = location.into();
+
     with_surface_tree_downward(
         surface,
-        location.into(),
-        |wl_surface, states, location: &Point<i32, Logical>| {
+        (location, parent_surface_transform),
+        |wl_surface, states, (location, parent_surface_transform)| {
             let mut location = *location;
             let data = states.data_map.get::<RefCell<SurfaceState>>();
 
+            let surface_transform = surface_transform(states);
+
             if states.role == Some("subsurface") {
                 let current = states.cached_state.current::<SubsurfaceCachedState>();
-                location += current.location;
+                location += parent_surface_transform
+                    .apply_point(current.location)
+                    .to_i32_ceil();
             }
 
             if states.role == Some("subsurface") || surface_type.contains(WindowSurfaceType::TOPLEVEL) {
                 let contains_the_point = data
                     .map(|data| {
+                        let surface_point = surface_transform.revert_point(point - location.to_f64());
                         data.borrow()
-                            .contains_point(&*states.cached_state.current(), point - location.to_f64())
+                            .contains_point(&*states.cached_state.current(), surface_point)
                     })
                     .unwrap_or(false);
                 if contains_the_point {
@@ -205,7 +492,7 @@ where
             }
 
             if surface_type.contains(WindowSurfaceType::SUBSURFACE) {
-                TraversalAction::DoChildren(location)
+                TraversalAction::DoChildren((location, surface_transform))
             } else {
                 TraversalAction::SkipChildren
             }
@@ -249,30 +536,47 @@ pub(crate) fn output_update(
     location: Point<i32, Logical>,
     logger: &slog::Logger,
 ) {
+    let parent_surface_transform = SurfaceTransform::default();
+
     with_surface_tree_downward(
         surface,
-        location,
-        |_, states, location| {
+        (location, parent_surface_transform),
+        |_, states, (location, parent_surface_transform)| {
             let mut location = *location;
             let data = states.data_map.get::<RefCell<SurfaceState>>();
 
             if data.is_some() {
+                let surface_transform = surface_transform(states);
                 if states.role == Some("subsurface") {
                     let current = states.cached_state.current::<SubsurfaceCachedState>();
-                    location += current.location;
+                    location += parent_surface_transform
+                        .apply_point(current.location)
+                        .to_i32_floor();
                 }
 
-                TraversalAction::DoChildren(location)
+                TraversalAction::DoChildren((location, surface_transform))
             } else {
                 // If the parent surface is unmapped, then the child surfaces are hidden as
                 // well, no need to consider them here.
                 TraversalAction::SkipChildren
             }
         },
-        |wl_surface, states, &loc| {
+        |wl_surface, states, (loc, parent_surface_transform)| {
+            let mut loc = *loc;
             let data = states.data_map.get::<RefCell<SurfaceState>>();
 
             if let Some(size) = data.and_then(|d| d.borrow().surface_size()) {
+                let surface_transform = surface_transform(states);
+
+                if states.role == Some("subsurface") {
+                    let current = states.cached_state.current::<SubsurfaceCachedState>();
+                    loc += parent_surface_transform
+                        .apply_point(current.location)
+                        .to_i32_floor();
+                }
+
+                let size = surface_transform.apply_size(size).to_i32_ceil();
+
                 let surface_rectangle = Rectangle { loc, size };
                 if output_geometry.overlaps(surface_rectangle) {
                     // We found a matching output, check if we already sent enter

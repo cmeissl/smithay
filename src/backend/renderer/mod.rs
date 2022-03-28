@@ -136,7 +136,7 @@ pub trait Frame {
     ///
     /// This operation is only valid in between a `begin` and `finish`-call.
     /// If called outside this operation may error-out, do nothing or modify future rendering results in any way.
-    fn clear(&mut self, color: [f32; 4], at: &[Rectangle<i32, Physical>]) -> Result<(), Self::Error>;
+    fn clear(&mut self, color: [f32; 4], at: &[Rectangle<f64, Physical>]) -> Result<(), Self::Error>;
 
     /// Render a texture to the current target as a flat 2d-plane at a given
     /// position and applying the given transformation with the given alpha value.
@@ -149,12 +149,12 @@ pub trait Frame {
         texture_scale: i32,
         output_scale: f64,
         src_transform: Transform,
-        damage: &[Rectangle<i32, Buffer>],
+        damage: &[Rectangle<f64, Physical>],
         alpha: f32,
     ) -> Result<(), Self::Error> {
         self.render_texture_from_to(
             texture,
-            Rectangle::from_loc_and_size(Point::<i32, Buffer>::from((0, 0)), texture.size()),
+            Rectangle::from_loc_and_size(Point::<i32, Buffer>::from((0, 0)), texture.size()).to_f64(),
             Rectangle::from_loc_and_size(
                 pos,
                 texture
@@ -175,9 +175,9 @@ pub trait Frame {
     fn render_texture_from_to(
         &mut self,
         texture: &Self::TextureId,
-        src: Rectangle<i32, Buffer>,
+        src: Rectangle<f64, Buffer>,
         dst: Rectangle<f64, Physical>,
-        damage: &[Rectangle<i32, Buffer>],
+        damage: &[Rectangle<f64, Physical>],
         src_transform: Transform,
         alpha: f32,
     ) -> Result<(), Self::Error>;

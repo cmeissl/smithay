@@ -366,18 +366,34 @@ impl<A: GraphicsApi> GpuManager<A> {
                         let buffer_damage = attributes
                             .damage
                             .iter()
-                            .map(|dmg| match dmg {
-                                Damage::Buffer(rect) => *rect,
-                                Damage::Surface(rect) => rect.to_buffer(
-                                    attributes.buffer_scale,
-                                    attributes.buffer_transform.into(),
-                                    &surface_size,
-                                ),
+                            .flat_map(|dmg| {
+                                match dmg {
+                                    Damage::Buffer(rect) => *rect,
+                                    Damage::Surface(rect) => rect.to_buffer(
+                                        attributes.buffer_scale,
+                                        attributes.buffer_transform.into(),
+                                        &surface_size,
+                                    ),
+                                }
+                                .intersection(Rectangle::from_loc_and_size(
+                                    (0, 0),
+                                    data.buffer_dimensions.unwrap(),
+                                ))
                             })
-                            .collect::<Vec<_>>();
+                            .fold(Vec::<Rectangle<i32, BufferCoords>>::new(), |damage, mut rect| {
+                                // replace with drain_filter, when that becomes stable to reuse the original Vec's memory
+                                let (overlapping, mut new_damage): (Vec<_>, Vec<_>) =
+                                    damage.into_iter().partition(|other| other.overlaps(rect));
+
+                                for overlap in overlapping {
+                                    rect = rect.merge(overlap);
+                                }
+                                new_damage.push(rect);
+                                new_damage
+                            });
 
                         if let Err(err) =
-                            self.early_import_buffer(source, target, buffer, states, &buffer_damage)
+                            self.early_import_buffer(source, target, buffer, states, &*buffer_damage)
                         {
                             result = Err(err);
                         }
@@ -501,7 +517,7 @@ impl<A: GraphicsApi> GpuManager<A> {
                                 })
                                 .collect::<Result<Vec<_>, Error<A, A>>>()?
                         };
-                        gpu_texture.insert_mapping::<A, _>(
+                        gpu_texture.insert_mapping::<A, A, _>(
                             *import_renderer.node(),
                             target,
                             texture.size(),
@@ -640,7 +656,7 @@ pub struct MultiFrame<R: GraphicsApi, T: GraphicsApi> {
     node: DrmNode,
     // FIXME: With GAT this would not need to be a raw-pointer
     frame: *mut <<R::Device as ApiDevice>::Renderer as Renderer>::Frame,
-    damage: Vec<Rectangle<i32, Physical>>,
+    damage: Vec<Rectangle<f64, Physical>>,
     // We need this for the associated Error type of the Frame implementation
     _target: std::marker::PhantomData<T>,
     log: ::slog::Logger,
@@ -857,8 +873,9 @@ where
         let mut damage = damage
             .into_iter()
             .map(|rect| {
-                rect.to_logical(1)
-                    .to_buffer(1, dst_transform, &size.to_logical(1))
+                rect.to_logical(1.0)
+                    .to_buffer(1.0, dst_transform, &size.to_logical(1).to_f64())
+                    .to_i32_up()
             })
             .collect::<Vec<_>>();
 
@@ -878,12 +895,20 @@ where
                     match target.renderer_mut().import_dmabuf(&dmabuf, Some(&damage)) {
                         Ok(texture) => {
                             // import successful
+                            let damage = damage
+                                .iter()
+                                .map(|rect| {
+                                    rect.to_logical(1, dst_transform, &buffer_size)
+                                        .to_physical(1)
+                                        .to_f64()
+                                })
+                                .collect::<Vec<_>>();
                             target
                                 .renderer_mut()
                                 .render(size, dst_transform, |_renderer, frame| {
                                     frame.render_texture_from_to(
                                         &texture,
-                                        Rectangle::from_loc_and_size((0, 0), buffer_size),
+                                        Rectangle::from_loc_and_size((0, 0), buffer_size).to_f64(),
                                         Rectangle::from_loc_and_size((0, 0), size).to_f64(),
                                         &damage,
                                         dst_transform.invert(),
@@ -963,16 +988,16 @@ where
                         let texture = target
                             .import_memory(slice, mapping.1.size, false)
                             .map_err(Error::Target)?;
+                        let dst = mapping
+                            .1
+                            .to_logical(1, Transform::Normal, &buffer_size)
+                            .to_physical(1);
                         frame
                             .render_texture_from_to(
                                 &texture,
-                                Rectangle::from_loc_and_size((0, 0), mapping.1.size),
-                                mapping
-                                    .1
-                                    .to_logical(1, Transform::Normal, &buffer_size)
-                                    .to_physical(1)
-                                    .to_f64(),
-                                &[Rectangle::from_loc_and_size((0, 0), mapping.1.size)],
+                                Rectangle::from_loc_and_size((0, 0), mapping.1.size).to_f64(),
+                                dst.to_f64(),
+                                &[Rectangle::from_loc_and_size((0, 0), dst.size).to_f64()],
                                 Transform::Normal,
                                 1.0,
                             )
@@ -1086,11 +1111,12 @@ impl MultiTexture {
     }
 
     fn insert_mapping<
-        A: GraphicsApi + 'static,
+        R: GraphicsApi + 'static,
+        T: GraphicsApi + 'static,
         I: Iterator<
             Item = (
                 Rectangle<i32, BufferCoords>,
-                <<A::Device as ApiDevice>::Renderer as ExportMem>::TextureMapping,
+                <<T::Device as ApiDevice>::Renderer as ExportMem>::TextureMapping,
             ),
         >,
     >(
@@ -1100,17 +1126,17 @@ impl MultiTexture {
         size: Size<i32, BufferCoords>,
         new_mappings: I,
     ) where
-        <A::Device as ApiDevice>::Renderer: ExportMem,
-        <<A::Device as ApiDevice>::Renderer as ExportMem>::TextureMapping: 'static,
+        <T::Device as ApiDevice>::Renderer: ExportMem,
+        <<T::Device as ApiDevice>::Renderer as ExportMem>::TextureMapping: 'static,
     {
         let mut tex = self.0.borrow_mut();
-        let textures = tex.textures.entry(TypeId::of::<A>()).or_default();
+        let textures = tex.textures.entry(TypeId::of::<R>()).or_default();
         let (old_texture, old_mapping) = textures
             .remove(&render)
             .map(|single| (single.texture, single.mapping))
             .unwrap_or((None, None));
         let old_texture = old_texture.filter(|tex| {
-            <dyn Any>::downcast_ref::<<<A::Device as ApiDevice>::Renderer as Renderer>::TextureId>(tex)
+            <dyn Any>::downcast_ref::<<<R::Device as ApiDevice>::Renderer as Renderer>::TextureId>(tex)
                 .map(|tex| tex.size())
                 == Some(size)
         });
@@ -1152,7 +1178,7 @@ where
     type Error = Error<R, T>;
     type TextureId = MultiTexture;
 
-    fn clear(&mut self, color: [f32; 4], at: &[Rectangle<i32, Physical>]) -> Result<(), Self::Error> {
+    fn clear(&mut self, color: [f32; 4], at: &[Rectangle<f64, Physical>]) -> Result<(), Self::Error> {
         self.damage.extend(at);
         unsafe { &mut *self.frame }
             .clear(color, at)
@@ -1162,16 +1188,14 @@ where
     fn render_texture_from_to(
         &mut self,
         texture: &Self::TextureId,
-        src: Rectangle<i32, BufferCoords>,
+        src: Rectangle<f64, BufferCoords>,
         dst: Rectangle<f64, Physical>,
-        damage: &[Rectangle<i32, BufferCoords>],
+        damage: &[Rectangle<f64, Physical>],
         src_transform: Transform,
         alpha: f32,
     ) -> Result<(), Self::Error> {
         if let Some(texture) = texture.get::<R>(&self.node) {
             self.damage.extend(damage.iter().map(|rect| {
-                let src = src.to_f64();
-                let rect = rect.to_f64();
                 let (x, y, w, h) = (rect.loc.x, rect.loc.y, rect.size.w, rect.size.h);
                 Rectangle::from_loc_and_size(
                     (
@@ -1180,7 +1204,6 @@ where
                     ),
                     (w / src.size.w * dst.size.w, h / src.size.h * dst.size.h),
                 )
-                .to_i32_round()
             }));
             unsafe { &mut *self.frame }
                 .render_texture_from_to(&*texture, src, dst, damage, src_transform, alpha)
@@ -1391,6 +1414,23 @@ where
             }
         }
 
+        let damage = damage.map(|damage| {
+            damage
+                .iter()
+                .flat_map(|rect| rect.intersection(Rectangle::from_loc_and_size((0, 0), dmabuf.size())))
+                .fold(Vec::<Rectangle<i32, BufferCoords>>::new(), |damage, mut rect| {
+                    // replace with drain_filter, when that becomes stable to reuse the original Vec's memory
+                    let (overlapping, mut new_damage): (Vec<_>, Vec<_>) =
+                        damage.into_iter().partition(|other| other.overlaps(rect));
+
+                    for overlap in overlapping {
+                        rect = rect.merge(overlap);
+                    }
+                    new_damage.push(rect);
+                    new_damage
+                })
+        });
+
         let source = if let Entry::Occupied(ref occ) = dma_source {
             Some(*occ.get())
         } else {
@@ -1416,7 +1456,7 @@ where
                 Some((_, mappings)) => !damage
                     .as_ref()
                     .filter(|_| texture.texture.is_some()) // we need a full import in that case
-                    .map(|x| Vec::from(*x))
+                    .cloned()
                     .unwrap_or_else(|| vec![Rectangle::from_loc_and_size((0, 0), size)])
                     .into_iter()
                     .all(|rect| mappings.iter().any(|(region, _)| region.contains_rect(rect))),
@@ -1428,11 +1468,15 @@ where
                 Some(s) => &s == target.node(),
                 None => true,
             }) {
-                if let Ok(dma_texture) = import_renderer.renderer_mut().import_dmabuf(dmabuf, damage) {
+                if let Ok(dma_texture) = import_renderer
+                    .renderer_mut()
+                    .import_dmabuf(dmabuf, damage.as_deref())
+                {
                     if let Entry::Vacant(vacant) = dma_source {
                         vacant.insert(*import_renderer.node());
                     }
                     let mappings = damage
+                        .as_deref()
                         .unwrap_or(&[Rectangle::from_loc_and_size((0, 0), dma_texture.size())])
                         .iter()
                         .cloned()
@@ -1444,7 +1488,7 @@ where
                             Ok((damage, mapping))
                         })
                         .collect::<Result<Vec<_>, Error<R, T>>>()?;
-                    texture.insert_mapping::<T, _>(
+                    texture.insert_mapping::<R, T, _>(
                         *import_renderer.node(),
                         *self.render.node(),
                         dma_texture.size(),
@@ -1461,8 +1505,12 @@ where
                 None => (Vec::new(), self.other_renderers.iter_mut().collect()),
             };
             for import_renderer in first.into_iter().chain(last.into_iter()) {
-                if let Ok(dma_texture) = import_renderer.renderer_mut().import_dmabuf(dmabuf, damage) {
+                if let Ok(dma_texture) = import_renderer
+                    .renderer_mut()
+                    .import_dmabuf(dmabuf, damage.as_deref())
+                {
                     let mappings = damage
+                        .as_deref()
                         .unwrap_or(&[Rectangle::from_loc_and_size((0, 0), texture.size())])
                         .iter()
                         .cloned()
@@ -1474,7 +1522,7 @@ where
                             Ok((damage, mapping))
                         })
                         .collect::<Result<Vec<_>, Error<R, T>>>()?;
-                    texture.insert_mapping::<R, _>(
+                    texture.insert_mapping::<R, R, _>(
                         *import_renderer.node(),
                         *self.render.node(),
                         texture.size(),
@@ -1510,7 +1558,7 @@ where
                     .map_err(Error::Target)?;
                 self.render
                     .renderer_mut()
-                    .import_memory(mapped, mapping.size(), mapping.flipped())
+                    .import_memory(mapped, mapping.size(), false)
                     .ok()
             } else if let Some(source) = self
                 .other_renderers
@@ -1527,12 +1575,14 @@ where
                     .map_err(Error::Render)?;
                 self.render
                     .renderer_mut()
-                    .import_memory(mapped, mapping.size(), mapping.flipped())
+                    .import_memory(mapped, mapping.size(), false)
                     .ok()
             } else {
                 None
             };
-            tex.texture = Some(Box::new(new_texture) as Box<_>);
+            if let Some(new_texture) = new_texture {
+                tex.texture = Some(Box::new(new_texture) as Box<_>);
+            }
         } else {
             // update
             let texture = <dyn Any>::downcast_ref::<

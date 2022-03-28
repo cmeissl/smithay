@@ -15,6 +15,8 @@ use crate::{
     },
 };
 
+use super::utils::surface_transform;
+
 /// Represents a popup surface
 #[derive(Debug, Clone)]
 pub enum PopupKind {
@@ -49,14 +51,28 @@ impl PopupKind {
             None => return Rectangle::from_loc_and_size((0, 0), (0, 0)),
         };
 
-        with_states(wl_surface, |states| {
-            states
+        let parent_surface_transform = self
+            .parent()
+            .map(|p| with_states(&p, surface_transform).unwrap_or_default())
+            .unwrap_or_default();
+
+        let (mut geometry, surface_transform) = with_states(wl_surface, |states| {
+            let geometry = states
                 .cached_state
                 .current::<SurfaceCachedState>()
                 .geometry
-                .unwrap_or_default()
+                .unwrap_or_default();
+
+            let surface_transform = surface_transform(states);
+
+            (geometry, surface_transform)
         })
-        .unwrap()
+        .unwrap();
+
+        geometry.loc = parent_surface_transform.apply_point(geometry.loc).to_i32_floor();
+        geometry.size = surface_transform.apply_size(geometry.size).to_i32_ceil();
+
+        geometry
     }
 
     fn send_done(&self) {
@@ -74,7 +90,7 @@ impl PopupKind {
             Some(s) => s,
             None => return (0, 0).into(),
         };
-        with_states(wl_surface, |states| {
+        let loc = with_states(wl_surface, |states| {
             states
                 .data_map
                 .get::<Mutex<XdgPopupSurfaceRoleAttributes>>()
@@ -85,7 +101,14 @@ impl PopupKind {
                 .geometry
         })
         .unwrap_or_default()
-        .loc
+        .loc;
+
+        let parent_surface_transform = self
+            .parent()
+            .map(|p| with_states(&p, surface_transform).unwrap_or_default())
+            .unwrap_or_default();
+
+        parent_surface_transform.apply_point(loc).to_i32_floor()
     }
 }
 

@@ -776,7 +776,7 @@ impl AnvilState<UdevData> {
             // Send frame events so that client start drawing their next frame
             self.space
                 .borrow()
-                .send_frames(false, self.start_time.elapsed().as_millis() as u32);
+                .send_frames(self.start_time.elapsed().as_millis() as u32);
         }
     }
 }
@@ -910,7 +910,10 @@ fn initial_render(
     renderer
         .render((1, 1).into(), Transform::Normal, |_, frame| {
             frame
-                .clear(CLEAR_COLOR, &[Rectangle::from_loc_and_size((0, 0), (1, 1))])
+                .clear(
+                    CLEAR_COLOR,
+                    &[Rectangle::from_loc_and_size((0.0, 0.0), (1.0, 1.0))],
+                )
                 .map_err(Into::<SwapBuffersError>::into)
         })
         .map_err(Into::<SwapBuffersError>::into)

@@ -186,10 +186,20 @@ impl Cacheable for SurfaceAttributes {
     }
     fn merge_into(self, into: &mut Self) {
         if self.buffer.is_some() {
+            if let Some(BufferAssignment::Removed) = &self.buffer {
+                into.damage.clear();
+            }
             if let Some(BufferAssignment::NewBuffer { buffer, .. }) =
                 std::mem::replace(&mut into.buffer, self.buffer)
             {
-                buffer.release();
+                let new_buffer = into.buffer.as_ref().and_then(|b| match b {
+                    BufferAssignment::Removed => None,
+                    BufferAssignment::NewBuffer { buffer, .. } => Some(buffer),
+                });
+
+                if Some(&buffer) != new_buffer {
+                    buffer.release();
+                }
             }
         }
         into.buffer_scale = self.buffer_scale;
