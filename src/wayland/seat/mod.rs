@@ -40,6 +40,8 @@ mod keyboard;
 mod pointer;
 mod touch;
 
+use crate::utils::{DeadResource, Logical, Point, Size};
+
 pub use self::{
     keyboard::{
         keysyms, Error as KeyboardError, FilterResult, GrabStartData as KeyboardGrabStartData, KeyboardGrab,
@@ -56,6 +58,8 @@ use wayland_server::{
     protocol::{wl_seat, wl_surface},
     Display, Filter, Global, Main, UserDataMap,
 };
+
+use super::compositor;
 
 #[derive(Debug)]
 struct Inner {
@@ -433,4 +437,71 @@ fn implement_seat(seat: Main<wl_seat::WlSeat>, arc: Rc<SeatRc>) -> wl_seat::WlSe
     seat.as_ref().user_data().set(move || arc);
 
     seat.deref().clone()
+}
+
+/// A transform that can be attached to a surface
+/// which can be used to alter the position of
+/// input events. This is mostly useful if the on screen
+/// surface differs from the actual surface size. For example
+/// compositor driven crop & scale can use this to transform
+/// the input positions back to actual surface logical coordinates.
+///
+/// Note: The scale will be applied before adding the offset.
+#[derive(Debug, PartialEq)]
+pub struct InputTransform {
+    /// Defines a offset that should be applied to
+    /// the input coordinate before sending it to
+    /// the client surface.
+    ///
+    /// This could be for example the top/left crop
+    /// of a surface
+    pub offset: Point<f64, Logical>,
+
+    /// Defines the scale that should be applied to
+    /// the input coordinate before sending it to
+    /// the client surface.
+    ///
+    /// This can be used if the surface size and
+    /// the size used for rendering is different.
+    pub scale: Size<f64, Logical>,
+}
+
+impl InputTransform {
+    fn apply(&self, mut point: Point<f64, Logical>) -> Point<f64, Logical> {
+        // first apply the scale
+        point.x *= self.scale.w;
+        point.y *= self.scale.h;
+        // then apply the offset
+        point.x += self.offset.x;
+        point.y += self.offset.y;
+
+        point
+    }
+}
+
+impl Default for InputTransform {
+    fn default() -> Self {
+        Self {
+            offset: Default::default(),
+            scale: Size::from((1.0, 1.0)),
+        }
+    }
+}
+
+/// Access the [`InputTransform`] for the specified surface
+pub fn with_input_transform<F, R>(surface: &wl_surface::WlSurface, f: F) -> Result<R, DeadResource>
+where
+    F: Fn(&mut InputTransform) -> R,
+{
+    compositor::with_states(surface, |states| {
+        states
+            .data_map
+            .insert_if_missing(|| RefCell::new(InputTransform::default()));
+        let mut input_transform = states
+            .data_map
+            .get::<RefCell<InputTransform>>()
+            .unwrap()
+            .borrow_mut();
+        f(&mut *input_transform)
+    })
 }
