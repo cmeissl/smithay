@@ -326,6 +326,7 @@ impl Space {
         for window in &self.windows {
             let bbox = window_rect(window, &self.id);
             let kind = window.toplevel();
+            let transform = window.0.transform.get();
 
             for output in &self.outputs {
                 let output_geometry = self
@@ -350,6 +351,8 @@ impl Space {
                         &mut output_state.surfaces,
                         surface,
                         window_loc(window, &self.id),
+                        transform.src,
+                        transform.scale,
                         &self.logger,
                     );
 
@@ -359,14 +362,20 @@ impl Space {
                         .flatten()
                     {
                         if let Some(surface) = popup.get_surface() {
-                            let location = window_loc(window, &self.id) + window.geometry().loc + location
-                                - popup.geometry().loc;
+                            let popup_offset = (location - popup.geometry().loc)
+                                .to_f64()
+                                .upscale(transform.scale)
+                                .to_i32_round();
+                            let location =
+                                window_loc(window, &self.id) + window.geometry().loc + popup_offset;
                             output_update(
                                 output,
                                 output_geometry,
                                 &mut output_state.surfaces,
                                 surface,
                                 location,
+                                None,
+                                transform.scale,
                                 &self.logger,
                             );
                         }

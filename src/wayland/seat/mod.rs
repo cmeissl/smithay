@@ -40,7 +40,7 @@ mod keyboard;
 mod pointer;
 mod touch;
 
-use crate::utils::{DeadResource, Logical, Point, Size};
+use crate::utils::{DeadResource, Logical, Point, Scale};
 
 pub use self::{
     keyboard::{
@@ -463,18 +463,15 @@ pub struct InputTransform {
     ///
     /// This can be used if the surface size and
     /// the size used for rendering is different.
-    pub scale: Size<f64, Logical>,
+    pub scale: Scale<f64>,
 }
 
 impl InputTransform {
-    fn apply(&self, mut point: Point<f64, Logical>) -> Point<f64, Logical> {
+    fn apply(&self, point: Point<f64, Logical>) -> Point<f64, Logical> {
         // first apply the scale
-        point.x *= self.scale.w;
-        point.y *= self.scale.h;
+        let mut point = point.upscale(self.scale);
         // then apply the offset
-        point.x += self.offset.x;
-        point.y += self.offset.y;
-
+        point += self.offset;
         point
     }
 }
@@ -483,7 +480,7 @@ impl Default for InputTransform {
     fn default() -> Self {
         Self {
             offset: Default::default(),
-            scale: Size::from((1.0, 1.0)),
+            scale: Scale::from(1.0),
         }
     }
 }

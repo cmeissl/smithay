@@ -1,13 +1,12 @@
 //! Helper functions to ease dealing with surface trees
 
 use crate::{
-    backend::renderer::utils::SurfaceState,
+    backend::renderer::utils::{surface_view, SurfaceState},
     desktop::Space,
-    utils::{Logical, Point, Rectangle},
+    utils::{Logical, Point, Rectangle, Scale},
     wayland::{
         compositor::{
-            with_surface_tree_downward, with_surface_tree_upward, SubsurfaceCachedState, SurfaceAttributes,
-            TraversalAction,
+            with_surface_tree_downward, with_surface_tree_upward, SurfaceAttributes, TraversalAction,
         },
         output::Output,
     },
@@ -21,6 +20,9 @@ use super::WindowSurfaceType;
 impl SurfaceState {
     fn contains_point<P: Into<Point<f64, Logical>>>(&self, attrs: &SurfaceAttributes, point: P) -> bool {
         let point = point.into();
+        // TODO: This is probably wrong as self.surface_size() will not return the logical size, but the
+        // buffer size converted to logical, ignoring viewporter. The surface_view.dst size would already
+        // have the viewport applied
         let size = match self.surface_size() {
             None => return false, // If the surface has no size, it can't have an input region.
             Some(size) => size,
@@ -54,32 +56,58 @@ impl SurfaceState {
 /// Returns the bounding box of a given surface and all its subsurfaces.
 ///
 /// - `location` can be set to offset the returned bounding box.
-pub fn bbox_from_surface_tree<P>(surface: &wl_surface::WlSurface, location: P) -> Rectangle<i32, Logical>
+pub fn bbox_from_surface_tree<P>(
+    surface: &wl_surface::WlSurface,
+    location: P,
+    src: Option<Rectangle<f64, Logical>>,
+    scale: impl Into<Scale<f64>>,
+) -> Rectangle<i32, Logical>
 where
     P: Into<Point<i32, Logical>>,
 {
     let location = location.into();
+    let scale = scale.into();
+    let src = src.unwrap_or_else(|| {
+        Rectangle::from_loc_and_size((f64::MIN, f64::MIN), (f64::INFINITY, f64::INFINITY))
+    });
     let mut bounding_box = Rectangle::from_loc_and_size(location, (0, 0));
     with_surface_tree_downward(
         surface,
-        location,
-        |_, states, loc: &Point<i32, Logical>| {
-            let mut loc = *loc;
-            let data = states.data_map.get::<RefCell<SurfaceState>>();
+        (Point::from((0.0, 0.0)), None),
+        |_, states, (surface_offset, parent_crop)| {
+            let mut surface_offset = *surface_offset;
 
-            if let Some(size) = data.and_then(|d| d.borrow().surface_size()) {
-                if states.role == Some("subsurface") {
-                    let current = states.cached_state.current::<SubsurfaceCachedState>();
-                    loc += current.location;
+            let surface_view = surface_view(states);
+
+            // Move the src rect relative to the surface
+            let mut src = src;
+            src.loc -= surface_offset + surface_view.offset;
+
+            // We use the surface view dst size here as this is the size
+            // the surface would be rendered on screen without applying the
+            // crop but it already includes wp_viewporter
+            let surface_rect = Rectangle::from_loc_and_size((0., 0.), surface_view.dst);
+
+            if let Some(intersection) = surface_rect.intersection(src) {
+                let mut offset = surface_view.offset;
+
+                // Correct the offset by the (parent)crop
+                if let Some(parent_crop) = *parent_crop {
+                    offset = (offset + intersection.loc) - parent_crop;
                 }
 
-                // Update the bounding box.
-                bounding_box = bounding_box.merge(Rectangle::from_loc_and_size(loc, size));
+                surface_offset += offset;
 
-                TraversalAction::DoChildren(loc)
+                let mut rect = Rectangle::from_loc_and_size(surface_offset, intersection.size)
+                    .upscale(scale)
+                    .to_i32_up();
+                rect.loc += location;
+
+                bounding_box = bounding_box.merge(rect);
+
+                TraversalAction::DoChildren((surface_offset, Some(intersection.loc)))
             } else {
-                // If the parent surface is unmapped, then the child surfaces are hidden as
-                // well, no need to consider them here.
+                // We are completely cropped, so are our children
                 TraversalAction::SkipChildren
             }
         },
@@ -100,27 +128,57 @@ pub fn damage_from_surface_tree<P>(
     surface: &wl_surface::WlSurface,
     location: P,
     key: Option<(&Space, &Output)>,
+    src: Option<Rectangle<f64, Logical>>,
+    scale: impl Into<Scale<f64>>,
 ) -> Vec<Rectangle<i32, Logical>>
 where
     P: Into<Point<i32, Logical>>,
 {
     use super::space::SpaceOutputTuple;
 
+    let location = location.into();
+    let scale = scale.into();
+    let src = src.unwrap_or_else(|| {
+        Rectangle::from_loc_and_size((f64::MIN, f64::MIN), (f64::INFINITY, f64::INFINITY))
+    });
+
     let mut damage = Vec::new();
     let key = key.map(|x| SpaceOutputTuple::from(x).owned_hash());
     with_surface_tree_upward(
         surface,
-        location.into(),
-        |_surface, states, location| {
-            let mut location = *location;
-            if states.role == Some("subsurface") {
-                let current = states.cached_state.current::<SubsurfaceCachedState>();
-                location += current.location;
+        (Point::from((0.0, 0.0)), None),
+        |_surface, states, (surface_offset, parent_crop)| {
+            let mut surface_offset = *surface_offset;
+
+            let surface_view = surface_view(states);
+
+            // Move the src rect relative to the surface
+            let mut src = src;
+            src.loc -= surface_offset + surface_view.offset;
+
+            // We use the surface view dst size here as this is the size
+            // the surface would be rendered on screen without applying the
+            // crop but it already includes wp_viewporter
+            let surface_rect = Rectangle::from_loc_and_size((0., 0.), surface_view.dst);
+
+            if let Some(intersection) = surface_rect.intersection(src) {
+                let mut offset = surface_view.offset;
+
+                // Correct the offset by the (parent)crop
+                if let Some(parent_crop) = *parent_crop {
+                    offset = (offset + intersection.loc) - parent_crop;
+                }
+
+                surface_offset += offset;
+
+                TraversalAction::DoChildren((surface_offset, Some(intersection.loc)))
+            } else {
+                // We are completely cropped, so are our children
+                TraversalAction::SkipChildren
             }
-            TraversalAction::DoChildren(location)
         },
-        |_surface, states, location| {
-            let mut location = *location;
+        |_surface, states, (surface_offset, parent_crop)| {
+            let mut surface_offset = *surface_offset;
             if let Some(data) = states.data_map.get::<RefCell<SurfaceState>>() {
                 let mut data = data.borrow_mut();
                 if key
@@ -128,10 +186,33 @@ where
                     .map(|key| data.space_seen.get(key).copied().unwrap_or(0) < data.commit_count)
                     .unwrap_or(true)
                 {
-                    if states.role == Some("subsurface") {
-                        let current = states.cached_state.current::<SubsurfaceCachedState>();
-                        location += current.location;
+                    let surface_view = surface_view(states);
+
+                    // Move the src rect relative to the surface
+                    let mut src = src;
+                    src.loc -= surface_offset + surface_view.offset;
+
+                    // We use the surface view dst size here as this is the size
+                    // the surface would be rendered on screen without applying the
+                    // crop but it already includes wp_viewporter
+                    let surface_rect = Rectangle::from_loc_and_size((0., 0.), surface_view.dst);
+
+                    let intersection = match surface_rect.intersection(src) {
+                        Some(rect) => rect,
+                        None => {
+                            return;
+                        }
+                    };
+
+                    let mut offset = surface_view.offset;
+
+                    // Correct the offset by the (parent)crop
+                    if let Some(parent_crop) = *parent_crop {
+                        offset = (offset + intersection.loc) - parent_crop;
                     }
+
+                    surface_offset += offset;
+
                     let new_damage = key
                         .as_ref()
                         .map(|key| data.damage_since(data.space_seen.get(key).copied()))
@@ -144,14 +225,32 @@ where
                             })
                         });
 
-                    damage.extend(new_damage.into_iter().map(|rect| {
-                        let mut rect = rect.to_logical(
+                    damage.extend(new_damage.into_iter().flat_map(|rect| {
+                        // First bring the buffer damage to logical space
+                        rect.to_logical(
                             data.buffer_scale,
                             data.buffer_transform,
                             &data.buffer_dimensions.unwrap(),
-                        );
-                        rect.loc += location;
-                        rect
+                        )
+                        .to_f64()
+                        // Then crop by the src ignoring any damage outside of it
+                        .intersection(surface_view.src)
+                        .map(|rect| {
+                            // Now move the rect into global space (for example viewporter could apply a scale)
+                            surface_view.rect_to_global(rect)
+                        })
+                        .and_then(|rect| {
+                            // Then apply the compositor driven crop and scale
+                            rect.intersection(src).map(|mut rect| {
+                                rect.loc -= intersection.loc;
+                                rect.loc += surface_offset;
+                                rect.upscale(scale).to_i32_up()
+                            })
+                        })
+                        .map(|mut rect| {
+                            rect.loc += location;
+                            rect
+                        })
                     }));
 
                     if let Some(key) = key {
@@ -177,38 +276,80 @@ pub fn under_from_surface_tree<P>(
     point: Point<f64, Logical>,
     location: P,
     surface_type: WindowSurfaceType,
+    src: Option<Rectangle<f64, Logical>>,
+    scale: impl Into<Scale<f64>>,
 ) -> Option<(wl_surface::WlSurface, Point<i32, Logical>)>
 where
     P: Into<Point<i32, Logical>>,
 {
+    let scale = scale.into();
+    let src = src.unwrap_or_else(|| {
+        Rectangle::from_loc_and_size((f64::MIN, f64::MIN), (f64::INFINITY, f64::INFINITY))
+    });
+    let location = location.into().to_f64();
+    let surface_tree_local_point = (point - location).downscale(scale);
+
     let found = RefCell::new(None);
     with_surface_tree_downward(
         surface,
-        location.into(),
-        |wl_surface, states, location: &Point<i32, Logical>| {
-            let mut location = *location;
-            let data = states.data_map.get::<RefCell<SurfaceState>>();
+        (Point::from((0.0, 0.0)), None),
+        |surface, states, (surface_offset, parent_crop)| {
+            let mut surface_offset = *surface_offset;
 
-            if states.role == Some("subsurface") {
-                let current = states.cached_state.current::<SubsurfaceCachedState>();
-                location += current.location;
-            }
+            let surface_view = surface_view(states);
 
-            if states.role == Some("subsurface") || surface_type.contains(WindowSurfaceType::TOPLEVEL) {
-                let contains_the_point = data
-                    .map(|data| {
-                        data.borrow()
-                            .contains_point(&*states.cached_state.current(), point - location.to_f64())
-                    })
-                    .unwrap_or(false);
-                if contains_the_point {
-                    *found.borrow_mut() = Some((wl_surface.clone(), location));
+            // Move the src rect relative to the surface
+            let mut src = src;
+            src.loc -= surface_offset + surface_view.offset;
+
+            // We use the surface view dst size here as this is the size
+            // the surface would be rendered on screen without applying the
+            // crop but it already includes wp_viewporter
+            let surface_rect = Rectangle::from_loc_and_size((0., 0.), surface_view.dst);
+
+            if let Some(intersection) = surface_rect.intersection(src) {
+                let mut offset = surface_view.offset;
+
+                // Correct the offset by the (parent)crop
+                if let Some(parent_crop) = *parent_crop {
+                    offset = (offset + intersection.loc) - parent_crop;
                 }
-            }
 
-            if surface_type.contains(WindowSurfaceType::SUBSURFACE) {
-                TraversalAction::DoChildren(location)
+                surface_offset += offset;
+
+                if states.role == Some("subsurface") || surface_type.contains(WindowSurfaceType::TOPLEVEL) {
+                    let rect = Rectangle::from_loc_and_size(surface_offset, intersection.size);
+                    // Test if the point is within our cropped surface rectangle
+                    if rect.contains(surface_tree_local_point) {
+                        // Move the point local to the surface and
+                        // add the surface crop so that the point is
+                        // correctly offset for the input region test
+                        let surface_local_point =
+                            (surface_tree_local_point - surface_offset) + intersection.loc;
+                        let data = states.data_map.get::<RefCell<SurfaceState>>();
+                        let contains_the_point = data
+                            .map(|data| {
+                                data.borrow()
+                                    .contains_point(&*states.cached_state.current(), surface_local_point)
+                            })
+                            .unwrap_or(false);
+                        if contains_the_point {
+                            *found.borrow_mut() = Some((
+                                surface.clone(),
+                                (location + surface_offset.upscale(scale).to_i32_floor()).to_i32_round(),
+                            ));
+                        }
+                    }
+                }
+
+                if surface_type.contains(WindowSurfaceType::SUBSURFACE) {
+                    TraversalAction::DoChildren((surface_offset, Some(intersection.loc)))
+                } else {
+                    // We are not interested in subsurfaces
+                    TraversalAction::SkipChildren
+                }
             } else {
+                // We are completely cropped, so are our children
                 TraversalAction::SkipChildren
             }
         },
@@ -218,6 +359,7 @@ where
             found.borrow().is_none()
         },
     );
+
     found.into_inner()
 }
 
@@ -243,49 +385,83 @@ pub fn send_frames_surface_tree(surface: &wl_surface::WlSurface, time: u32) {
     );
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn output_update(
     output: &Output,
     output_geometry: Rectangle<i32, Logical>,
     surface_list: &mut Vec<wl_surface::WlSurface>,
     surface: &wl_surface::WlSurface,
     location: Point<i32, Logical>,
+    src: Option<Rectangle<f64, Logical>>,
+    scale: impl Into<Scale<f64>>,
     logger: &slog::Logger,
 ) {
-    with_surface_tree_downward(
+    let scale = scale.into();
+    let src = src.unwrap_or_else(|| {
+        Rectangle::from_loc_and_size((f64::MIN, f64::MIN), (f64::INFINITY, f64::INFINITY))
+    });
+
+    with_surface_tree_upward(
         surface,
-        location,
-        |_, states, location| {
-            let mut location = *location;
-            let data = states.data_map.get::<RefCell<SurfaceState>>();
+        (Point::from((0.0, 0.0)), None),
+        |_surface, states, (surface_offset, parent_crop)| {
+            let mut surface_offset = *surface_offset;
 
-            if data.is_some() {
-                if states.role == Some("subsurface") {
-                    let current = states.cached_state.current::<SubsurfaceCachedState>();
-                    location += current.location;
-                }
+            let surface_view = surface_view(states);
 
-                TraversalAction::DoChildren(location)
-            } else {
-                // If the parent surface is unmapped, then the child surfaces are hidden as
-                // well, no need to consider them here.
-                TraversalAction::SkipChildren
+            // Move the src rect relative to the surface
+            let mut src = src;
+            src.loc -= surface_offset + surface_view.offset;
+
+            // We use the surface view dst size here as this is the size
+            // the surface would be rendered on screen without applying the
+            // crop but it already includes wp_viewporter
+            let surface_rect = Rectangle::from_loc_and_size((0., 0.), surface_view.dst);
+            let intersection = surface_rect.intersection(src).unwrap_or_default();
+            let mut offset = surface_view.offset;
+
+            // Correct the offset by the (parent)crop
+            if let Some(parent_crop) = *parent_crop {
+                offset = (offset + intersection.loc) - parent_crop;
             }
-        },
-        |wl_surface, states, &loc| {
-            let data = states.data_map.get::<RefCell<SurfaceState>>();
 
-            if let Some(size) = data.and_then(|d| d.borrow().surface_size()) {
-                let surface_rectangle = Rectangle { loc, size };
-                if output_geometry.overlaps(surface_rectangle) {
-                    // We found a matching output, check if we already sent enter
-                    output_enter(output, surface_list, wl_surface, logger);
-                } else {
-                    // Surface does not match output, if we sent enter earlier
-                    // we should now send leave
-                    output_leave(output, surface_list, wl_surface, logger);
-                }
+            surface_offset += offset;
+
+            TraversalAction::DoChildren((surface_offset, Some(intersection.loc)))
+        },
+        |wl_surface, states, (surface_offset, parent_crop)| {
+            let mut surface_offset = *surface_offset;
+            let surface_view = surface_view(states);
+
+            // Move the src rect relative to the surface
+            let mut src = src;
+            src.loc -= surface_offset + surface_view.offset;
+
+            // We use the surface view dst size here as this is the size
+            // the surface would be rendered on screen without applying the
+            // crop but it already includes wp_viewporter
+            let surface_rect = Rectangle::from_loc_and_size((0., 0.), surface_view.dst);
+            let intersection = surface_rect.intersection(src).unwrap_or_default();
+            let mut offset = surface_view.offset;
+
+            // Correct the offset by the (parent)crop
+            if let Some(parent_crop) = *parent_crop {
+                offset = (offset + intersection.loc) - parent_crop;
+            }
+
+            surface_offset += offset;
+
+            let mut rect = Rectangle::from_loc_and_size(surface_offset, intersection.size)
+                .upscale(scale)
+                .to_i32_up();
+            rect.loc += location;
+
+            if output_geometry.overlaps(rect) {
+                // We found a matching output, check if we already sent enter
+                output_enter(output, surface_list, wl_surface, logger);
             } else {
-                // Maybe the the surface got unmapped, send leave on output
+                // Surface does not match output, if we sent enter earlier
+                // we should now send leave
                 output_leave(output, surface_list, wl_surface, logger);
             }
         },

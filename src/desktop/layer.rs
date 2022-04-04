@@ -476,7 +476,7 @@ impl LayerSurface {
     /// Returns the bounding box over this layer surface and its subsurfaces.
     pub fn bbox(&self) -> Rectangle<i32, Logical> {
         if let Some(surface) = self.0.surface.get_surface() {
-            bbox_from_surface_tree(surface, (0, 0))
+            bbox_from_surface_tree(surface, (0, 0), None, 1.0)
         } else {
             Rectangle::from_loc_and_size((0, 0), (0, 0))
         }
@@ -495,7 +495,7 @@ impl LayerSurface {
                 .flatten()
             {
                 if let Some(surface) = popup.get_surface() {
-                    bounding_box = bounding_box.merge(bbox_from_surface_tree(surface, location));
+                    bounding_box = bounding_box.merge(bbox_from_surface_tree(surface, location, None, 1.0));
                 }
             }
         }
@@ -518,15 +518,14 @@ impl LayerSurface {
                 .into_iter()
                 .flatten()
             {
-                if let Some(result) = popup
-                    .get_surface()
-                    .and_then(|surface| under_from_surface_tree(surface, point, location, surface_type))
-                {
+                if let Some(result) = popup.get_surface().and_then(|surface| {
+                    under_from_surface_tree(surface, point, location, surface_type, None, 1.0)
+                }) {
                     return Some(result);
                 }
             }
 
-            under_from_surface_tree(surface, point, (0, 0), surface_type)
+            under_from_surface_tree(surface, point, (0, 0), surface_type, None, 1.0)
         } else {
             None
         }
@@ -544,7 +543,7 @@ impl LayerSurface {
         let mut damage = Vec::new();
         if let Some(surface) = self.get_surface() {
             damage.extend(
-                damage_from_surface_tree(surface, (0, 0), for_values)
+                damage_from_surface_tree(surface, (0, 0), for_values, None, 1.0)
                     .into_iter()
                     .flat_map(|rect| rect.intersection(self.bbox())),
             );
@@ -554,8 +553,8 @@ impl LayerSurface {
                 .flatten()
             {
                 if let Some(surface) = popup.get_surface() {
-                    let bbox = bbox_from_surface_tree(surface, location);
-                    let popup_damage = damage_from_surface_tree(surface, location, for_values);
+                    let bbox = bbox_from_surface_tree(surface, location, None, 1.0);
+                    let popup_damage = damage_from_surface_tree(surface, location, for_values, None, 1.0);
                     damage.extend(popup_damage.into_iter().flat_map(|rect| rect.intersection(bbox)));
                 }
             }
@@ -611,7 +610,7 @@ where
 {
     let location = location.into();
     if let Some(surface) = layer.get_surface() {
-        draw_surface_tree(renderer, frame, surface, scale, location, damage, log)?;
+        draw_surface_tree(renderer, frame, surface, scale, location, damage, None, 1.0, log)?;
         for (popup, p_location) in PopupManager::popups_for_surface(surface)
             .ok()
             .into_iter()
@@ -633,6 +632,8 @@ where
                     scale,
                     location + p_location,
                     &damage,
+                    None,
+                    1.0,
                     log,
                 )?;
             }

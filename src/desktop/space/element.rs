@@ -204,16 +204,14 @@ where
     }
 
     fn geometry(&self) -> Rectangle<i32, Logical> {
-        let mut bbox = bbox_from_surface_tree(&self.surface, (0, 0));
-        bbox.loc += self.position;
-        bbox
+        bbox_from_surface_tree(&self.surface, self.position, None, 1.0)
     }
 
     fn accumulated_damage(
         &self,
         for_values: Option<SpaceOutputTuple<'_, '_>>,
     ) -> Vec<Rectangle<i32, Logical>> {
-        damage_from_surface_tree(&self.surface, (0, 0), for_values.map(|x| (x.0, x.1)))
+        damage_from_surface_tree(&self.surface, (0, 0), for_values.map(|x| (x.0, x.1)), None, 1.0)
     }
 
     fn draw(
@@ -232,6 +230,8 @@ where
             scale,
             location,
             damage,
+            None,
+            1.0,
             log,
         )
     }

@@ -1,5 +1,5 @@
 use std::fmt;
-use std::ops::{Add, AddAssign, Sub, SubAssign};
+use std::ops::{Add, AddAssign, Mul, Sub, SubAssign};
 
 #[cfg(feature = "wayland_frontend")]
 use wayland_server::protocol::wl_output::Transform as WlTransform;
@@ -253,6 +253,52 @@ floating_point_coordinate_impl! {
 }
 
 /*
+ * Scale
+ */
+
+/// A two-dimensional scale that can be
+/// used to scale [`Point`]s, [`Size`]s and
+/// [`Rectangle`]s
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Scale<N: Coordinate> {
+    /// The scale on the x axis
+    pub x: N,
+    /// The scale on the y axis
+    pub y: N,
+}
+
+impl<N: Coordinate> From<N> for Scale<N> {
+    fn from(scale: N) -> Self {
+        Scale { x: scale, y: scale }
+    }
+}
+
+impl<N: Coordinate> From<(N, N)> for Scale<N> {
+    fn from((scale_x, scale_y): (N, N)) -> Self {
+        Scale {
+            x: scale_x,
+            y: scale_y,
+        }
+    }
+}
+
+impl<N, T> Mul<T> for Scale<N>
+where
+    N: Coordinate,
+    T: Into<Scale<N>>,
+{
+    type Output = Scale<N>;
+
+    fn mul(self, rhs: T) -> Self::Output {
+        let rhs = rhs.into();
+        Scale {
+            x: self.x.upscale(rhs.x),
+            y: self.y.upscale(rhs.y),
+        }
+    }
+}
+
+/*
  * Point
  */
 
@@ -294,6 +340,28 @@ impl<N: Coordinate, Kind> Point<N, Kind> {
         Size {
             w: self.x.abs(),
             h: self.y.abs(),
+            _kind: std::marker::PhantomData,
+        }
+    }
+
+    /// Upscale this [`Point`] by a specified [`Scale`]
+    #[inline]
+    pub fn upscale(self, scale: impl Into<Scale<N>>) -> Point<N, Kind> {
+        let scale = scale.into();
+        Point {
+            x: self.x.upscale(scale.x),
+            y: self.y.upscale(scale.y),
+            _kind: std::marker::PhantomData,
+        }
+    }
+
+    /// Downscale this [`Point`] by a specified [`Scale`]
+    #[inline]
+    pub fn downscale(self, scale: impl Into<Scale<N>>) -> Point<N, Kind> {
+        let scale = scale.into();
+        Point {
+            x: self.x.downscale(scale.x),
+            y: self.y.downscale(scale.y),
             _kind: std::marker::PhantomData,
         }
     }
@@ -399,10 +467,11 @@ impl<N: fmt::Debug> fmt::Debug for Point<N, Buffer> {
 impl<N: Coordinate> Point<N, Logical> {
     #[inline]
     /// Convert this logical point to physical coordinate space according to given scale factor
-    pub fn to_physical(self, scale: N) -> Point<N, Physical> {
+    pub fn to_physical(self, scale: impl Into<Scale<N>>) -> Point<N, Physical> {
+        let scale = scale.into();
         Point {
-            x: self.x.upscale(scale),
-            y: self.y.upscale(scale),
+            x: self.x.upscale(scale.x),
+            y: self.y.upscale(scale.y),
             _kind: std::marker::PhantomData,
         }
     }
@@ -422,10 +491,11 @@ impl<N: Coordinate> Point<N, Logical> {
 impl<N: Coordinate> Point<N, Physical> {
     #[inline]
     /// Convert this physical point to logical coordinate space according to given scale factor
-    pub fn to_logical(self, scale: N) -> Point<N, Logical> {
+    pub fn to_logical(self, scale: impl Into<Scale<N>>) -> Point<N, Logical> {
+        let scale = scale.into();
         Point {
-            x: self.x.downscale(scale),
-            y: self.y.downscale(scale),
+            x: self.x.downscale(scale.x),
+            y: self.y.downscale(scale.y),
             _kind: std::marker::PhantomData,
         }
     }
@@ -553,6 +623,20 @@ pub struct Size<N, Kind> {
     _kind: std::marker::PhantomData<Kind>,
 }
 
+impl<N: Coordinate, Kind> PartialOrd<Size<N, Kind>> for Size<N, Kind> {
+    fn partial_cmp(&self, other: &Size<N, Kind>) -> Option<std::cmp::Ordering> {
+        match self.w.partial_cmp(&other.w) {
+            Some(core::cmp::Ordering::Equal) => {}
+            ord => return ord,
+        }
+        match self.h.partial_cmp(&other.h) {
+            Some(core::cmp::Ordering::Equal) => {}
+            ord => return ord,
+        }
+        self._kind.partial_cmp(&other._kind)
+    }
+}
+
 impl<N: Coordinate, Kind> Size<N, Kind> {
     /// Convert this [`Size`] to a [`Point`] with the same coordinates
     #[inline]
@@ -562,6 +646,36 @@ impl<N: Coordinate, Kind> Size<N, Kind> {
             y: self.h,
             _kind: std::marker::PhantomData,
         }
+    }
+
+    /// Upscale this [`Size`] by a specified [`Scale`]
+    #[inline]
+    pub fn upscale(self, scale: impl Into<Scale<N>>) -> Size<N, Kind> {
+        let scale = scale.into();
+        Size {
+            w: self.w.upscale(scale.x),
+            h: self.h.upscale(scale.y),
+            _kind: std::marker::PhantomData,
+        }
+    }
+
+    /// Downscale this [`Size`] by a specified [`Scale`]
+    #[inline]
+    pub fn downscale(self, scale: impl Into<Scale<N>>) -> Size<N, Kind> {
+        let scale = scale.into();
+        Size {
+            w: self.w.downscale(scale.x),
+            h: self.h.downscale(scale.y),
+            _kind: std::marker::PhantomData,
+        }
+    }
+
+    /// Check if this [`Size`] is empty
+    ///
+    /// Returns true if either the width or the height is zero
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.w == N::default() || self.h == N::default()
     }
 }
 
@@ -662,10 +776,11 @@ impl<N: fmt::Debug> fmt::Debug for Size<N, Buffer> {
 impl<N: Coordinate> Size<N, Logical> {
     #[inline]
     /// Convert this logical size to physical coordinate space according to given scale factor
-    pub fn to_physical(self, scale: N) -> Size<N, Physical> {
+    pub fn to_physical(self, scale: impl Into<Scale<N>>) -> Size<N, Physical> {
+        let scale = scale.into();
         Size {
-            w: self.w.upscale(scale),
-            h: self.h.upscale(scale),
+            w: self.w.upscale(scale.x),
+            h: self.h.upscale(scale.y),
             _kind: std::marker::PhantomData,
         }
     }
@@ -684,10 +799,11 @@ impl<N: Coordinate> Size<N, Logical> {
 impl<N: Coordinate> Size<N, Physical> {
     #[inline]
     /// Convert this physical point to logical coordinate space according to given scale factor
-    pub fn to_logical(self, scale: N) -> Size<N, Logical> {
+    pub fn to_logical(self, scale: impl Into<Scale<N>>) -> Size<N, Logical> {
+        let scale = scale.into();
         Size {
-            w: self.w.downscale(scale),
-            h: self.h.downscale(scale),
+            w: self.w.downscale(scale.x),
+            h: self.h.downscale(scale.y),
             _kind: std::marker::PhantomData,
         }
     }
@@ -837,6 +953,32 @@ impl<N: Coordinate, Kind> Rectangle<N, Kind> {
             size: self.size.to_f64(),
         }
     }
+
+    /// Upscale this [`Rectangle`] by the supplied [`Scale`]
+    pub fn upscale(self, scale: impl Into<Scale<N>>) -> Rectangle<N, Kind> {
+        let scale = scale.into();
+        Rectangle {
+            loc: self.loc.upscale(scale),
+            size: self.size.upscale(scale),
+        }
+    }
+
+    /// Upscale this [`Rectangle`] by the supplied [`Scale`]
+    pub fn downscale(self, scale: impl Into<Scale<N>>) -> Rectangle<N, Kind> {
+        let scale = scale.into();
+        Rectangle {
+            loc: self.loc.downscale(scale),
+            size: self.size.downscale(scale),
+        }
+    }
+
+    /// Check if this [`Rectangle`] is empty
+    ///
+    /// Returns true if either the width or the height
+    /// of the [`Size`] is zero
+    pub fn is_empty(&self) -> bool {
+        self.size.is_empty()
+    }
 }
 
 impl<Kind> Rectangle<f64, Kind> {
@@ -973,7 +1115,8 @@ impl<N: Coordinate, Kind> Rectangle<N, Kind> {
 impl<N: Coordinate> Rectangle<N, Logical> {
     /// Convert this logical rectangle to physical coordinate space according to given scale factor
     #[inline]
-    pub fn to_physical(self, scale: N) -> Rectangle<N, Physical> {
+    pub fn to_physical(self, scale: impl Into<Scale<N>>) -> Rectangle<N, Physical> {
+        let scale = scale.into();
         Rectangle {
             loc: self.loc.to_physical(scale),
             size: self.size.to_physical(scale),
@@ -1007,7 +1150,8 @@ impl<N: Coordinate> Rectangle<N, Logical> {
 impl<N: Coordinate> Rectangle<N, Physical> {
     /// Convert this physical rectangle to logical coordinate space according to given scale factor
     #[inline]
-    pub fn to_logical(self, scale: N) -> Rectangle<N, Logical> {
+    pub fn to_logical(self, scale: impl Into<Scale<N>>) -> Rectangle<N, Logical> {
+        let scale = scale.into();
         Rectangle {
             loc: self.loc.to_logical(scale),
             size: self.size.to_logical(scale),

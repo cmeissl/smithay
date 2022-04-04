@@ -6,6 +6,7 @@ use crate::{
         space::Space,
         utils::{bbox_from_surface_tree, damage_from_surface_tree},
         window::Window,
+        WindowTransform,
     },
     utils::{Logical, Point, Rectangle},
     wayland::{output::Output, shell::wlr_layer::Layer},
@@ -19,11 +20,13 @@ pub struct RenderPopup {
     location: Point<i32, Logical>,
     popup: PopupKind,
     z_index: u8,
+    transform: WindowTransform,
 }
 
 impl Window {
     pub(super) fn popup_elements(&self, space_id: usize) -> impl Iterator<Item = RenderPopup> {
         let loc = self.elem_location(space_id) + self.geometry().loc;
+        let transform = self.0.transform.get();
         self.toplevel()
             .get_surface()
             .map(move |surface| {
@@ -32,11 +35,16 @@ impl Window {
                     .into_iter()
                     .flatten()
                     .map(move |(popup, location)| {
-                        let offset = loc + location - popup.geometry().loc;
+                        let popup_offset = location - popup.geometry().loc;
+                        let offset = loc + popup_offset.to_f64().upscale(transform.scale).to_i32_round();
                         RenderPopup {
                             location: offset,
                             popup,
                             z_index: RenderZindex::Popups as u8,
+                            transform: WindowTransform {
+                                scale: transform.scale,
+                                ..Default::default()
+                            },
                         }
                     })
             })
@@ -70,6 +78,7 @@ impl LayerSurface {
                             location: offset,
                             popup,
                             z_index,
+                            transform: WindowTransform::default(),
                         }
                     })
             })
@@ -92,7 +101,7 @@ impl RenderPopup {
 
     pub(super) fn elem_geometry(&self, _space_id: usize) -> Rectangle<i32, Logical> {
         if let Some(surface) = self.popup.get_surface() {
-            bbox_from_surface_tree(surface, self.location)
+            bbox_from_surface_tree(surface, self.location, self.transform.src, self.transform.scale)
         } else {
             Rectangle::from_loc_and_size((0, 0), (0, 0))
         }
@@ -103,7 +112,13 @@ impl RenderPopup {
         for_values: Option<(&Space, &Output)>,
     ) -> Vec<Rectangle<i32, Logical>> {
         if let Some(surface) = self.popup.get_surface() {
-            damage_from_surface_tree(surface, (0, 0), for_values)
+            damage_from_surface_tree(
+                surface,
+                (0, 0),
+                for_values,
+                self.transform.src,
+                self.transform.scale,
+            )
         } else {
             Vec::new()
         }
