@@ -1,7 +1,10 @@
 use crate::{
-    backend::renderer::{utils::draw_surface_tree, ImportAll, Renderer},
+    backend::renderer::{
+        utils::{draw_surface_tree, with_surface_transform, SurfaceTransform},
+        ImportAll, Renderer,
+    },
     desktop::{utils::*, PopupManager, Space},
-    utils::{Logical, Point, Rectangle},
+    utils::{Coordinate, Logical, Point, Rectangle, Size},
     wayland::{
         compositor::with_states,
         output::Output,
@@ -88,6 +91,7 @@ pub(super) struct WindowInner {
     bbox: Cell<Rectangle<i32, Logical>>,
     pub(super) z_index: Cell<Option<u8>>,
     user_data: UserDataMap,
+    size: Cell<Option<Size<i32, Logical>>>,
 }
 
 impl Drop for WindowInner {
@@ -140,6 +144,7 @@ impl Window {
             bbox: Cell::new(Rectangle::from_loc_and_size((0, 0), (0, 0))),
             user_data: UserDataMap::new(),
             z_index: Cell::new(None),
+            size: Cell::new(None),
         }))
     }
 
@@ -149,21 +154,56 @@ impl Window {
             Some(surface) => surface,
             None => return Rectangle::from_loc_and_size((0, 0), (0, 0)),
         };
-        // It's the set geometry with the full bounding box as the fallback.
-        with_states(surface, |states| {
-            states.cached_state.current::<SurfaceCachedState>().geometry
+
+        let geometry = self.real_geometry();
+        with_surface_transform(surface, |transform| {
+            let mut geo = geometry.to_f64();
+
+            if let Some(src) = transform.src {
+                // TODO: Move the bbox by the amount of how much
+                // has been effectively cropped
+                geo = geo.intersection(src).unwrap_or_default()
+            }
+
+            if let Some(scale) = transform.scale {
+                geo.loc.x = geo.loc.x.upscale(scale.w);
+                geo.loc.y = geo.loc.y.upscale(scale.h);
+                geo.size.w = geo.size.w.upscale(scale.w);
+                geo.size.h = geo.size.h.upscale(scale.h);
+            }
+
+            geo.to_i32_up()
         })
         .unwrap()
-        .unwrap_or_else(|| self.bbox())
     }
 
     /// Returns a bounding box over this window and its children.
     pub fn bbox(&self) -> Rectangle<i32, Logical> {
-        if self.0.toplevel.get_surface().is_some() {
-            self.0.bbox.get()
-        } else {
-            Rectangle::from_loc_and_size((0, 0), (0, 0))
-        }
+        let surface = match self.0.toplevel.get_surface() {
+            Some(surface) => surface,
+            None => return Rectangle::default(),
+        };
+
+        let bbox = self.0.bbox.get();
+        with_surface_transform(surface, |transform| {
+            let mut bbox = bbox.to_f64();
+
+            if let Some(src) = transform.src {
+                // TODO: Move the bbox by the amount of how much
+                // has been effectively cropped
+                bbox = bbox.intersection(src).unwrap_or_default()
+            }
+
+            if let Some(scale) = transform.scale {
+                bbox.loc.x = bbox.loc.x.upscale(scale.w);
+                bbox.loc.y = bbox.loc.y.upscale(scale.h);
+                bbox.size.w = bbox.size.w.upscale(scale.w);
+                bbox.size.h = bbox.size.h.upscale(scale.h);
+            }
+
+            bbox.to_i32_up()
+        })
+        .unwrap()
     }
 
     /// Returns a bounding box over this window and children including popups.
@@ -216,16 +256,19 @@ impl Window {
     /// Sends the frame callback to all the subsurfaces in this
     /// window that requested it
     pub fn send_frame(&self, time: u32) {
-        if let Some(surface) = self.0.toplevel.get_surface() {
-            send_frames_surface_tree(surface, time);
-            for (popup, _) in PopupManager::popups_for_surface(surface)
-                .ok()
-                .into_iter()
-                .flatten()
-            {
-                if let Some(surface) = popup.get_surface() {
-                    send_frames_surface_tree(surface, time);
-                }
+        let surface = match self.0.toplevel.get_surface() {
+            Some(surface) => surface,
+            None => return,
+        };
+
+        send_frames_surface_tree(surface, time);
+        for (popup, _) in PopupManager::popups_for_surface(surface)
+            .ok()
+            .into_iter()
+            .flatten()
+        {
+            if let Some(surface) = popup.get_surface() {
+                send_frames_surface_tree(surface, time);
             }
         }
     }
@@ -235,9 +278,35 @@ impl Window {
     /// Needs to be called whenever the toplevel surface or any unsynchronized subsurfaces of this window are updated
     /// to correctly update the bounding box of this window.
     pub fn refresh(&self) {
-        if let Some(surface) = self.0.toplevel.get_surface() {
-            self.0.bbox.set(bbox_from_surface_tree(surface, (0, 0)));
-        }
+        let surface = match self.0.toplevel.get_surface() {
+            Some(surface) => surface,
+            None => return,
+        };
+
+        self.0.bbox.set(bbox_from_surface_tree(surface, (0, 0)));
+
+        let geometry = self.real_geometry();
+        let transform = if geometry.size.w > 0 && geometry.size.h > 0 {
+            let scale = if let Some(size) = self.0.size.get() {
+                let scale: Size<f64, Logical> = Size::from((
+                    size.w as f64 / geometry.size.w as f64,
+                    size.h as f64 / geometry.size.h as f64,
+                ));
+
+                Some(scale)
+            } else {
+                None
+            };
+
+            SurfaceTransform { src: None, scale }
+        } else {
+            SurfaceTransform::default()
+        };
+
+        with_surface_transform(surface, |t| {
+            *t = transform;
+        })
+        .unwrap();
     }
 
     /// Finds the topmost surface under this point matching the input regions of the surface and returns
@@ -312,6 +381,43 @@ impl Window {
     /// [`RenderZindex::Shell`](crate::desktop::space::RenderZindex).
     pub fn clear_z_index(&self) {
         self.0.z_index.take();
+    }
+
+    /// Allows to override the size of the window on screen
+    ///
+    /// This will internally calculate the [`SurfaceTransform`]
+    /// based on the real geometry of the window and the
+    /// specified size.
+    ///
+    /// To unset the size override pass [`None`]
+    pub fn override_size(&self, size: Option<Size<i32, Logical>>) {
+        self.0.size.set(size);
+        self.refresh();
+    }
+
+    /// Returns the real geometry of this window without
+    /// applying the crop and scale
+    fn real_geometry(&self) -> Rectangle<i32, Logical> {
+        let surface = match self.0.toplevel.get_surface() {
+            Some(surface) => surface,
+            None => return Rectangle::default(),
+        };
+
+        let bbox = self.0.bbox.get();
+        let geometry = with_states(surface, |states| {
+            states.cached_state.current::<SurfaceCachedState>().geometry
+        })
+        .unwrap_or_default();
+
+        if let Some(geometry) = geometry {
+            // When applied, the effective window geometry will be the set window geometry clamped to the
+            // bounding rectangle of the combined geometry of the surface of the xdg_surface and the associated subsurfaces.
+            geometry.intersection(bbox).unwrap_or_default()
+        } else {
+            // If never set, the value is the full bounds of the surface, including any subsurfaces.
+            // This updates dynamically on every commit. This unset is meant for extremely simple clients.
+            bbox
+        }
     }
 }
 

@@ -1,7 +1,7 @@
 //! Helper functions to ease dealing with surface trees
 
 use crate::{
-    backend::renderer::utils::SurfaceState,
+    backend::renderer::utils::{surface_view, SurfaceState},
     desktop::Space,
     utils::{Logical, Point, Rectangle},
     wayland::{
@@ -110,13 +110,11 @@ where
     let key = key.map(|x| SpaceOutputTuple::from(x).owned_hash());
     with_surface_tree_upward(
         surface,
-        location.into(),
+        location.into().to_f64(),
         |_surface, states, location| {
             let mut location = *location;
-            if states.role == Some("subsurface") {
-                let current = states.cached_state.current::<SubsurfaceCachedState>();
-                location += current.location;
-            }
+            let surface_view = surface_view(states);
+            location += surface_view.offset;
             TraversalAction::DoChildren(location)
         },
         |_surface, states, location| {
@@ -128,10 +126,8 @@ where
                     .map(|key| data.space_seen.get(key).copied().unwrap_or(0) < data.commit_count)
                     .unwrap_or(true)
                 {
-                    if states.role == Some("subsurface") {
-                        let current = states.cached_state.current::<SubsurfaceCachedState>();
-                        location += current.location;
-                    }
+                    let surface_view = surface_view(states);
+                    location += surface_view.offset;
                     let new_damage = key
                         .as_ref()
                         .map(|key| data.damage_since(data.space_seen.get(key).copied()))
@@ -144,14 +140,19 @@ where
                             })
                         });
 
-                    damage.extend(new_damage.into_iter().map(|rect| {
-                        let mut rect = rect.to_logical(
+                    damage.extend(new_damage.into_iter().flat_map(|rect| {
+                        rect.to_logical(
                             data.buffer_scale,
                             data.buffer_transform,
                             &data.buffer_dimensions.unwrap(),
-                        );
-                        rect.loc += location;
-                        rect
+                        )
+                        .to_f64()
+                        .intersection(surface_view.src)
+                        .map(|rect| {
+                            let mut rect = surface_view.rect_to_global(rect);
+                            rect.loc += location;
+                            rect.to_i32_up()
+                        })
                     }));
 
                     if let Some(key) = key {
@@ -184,25 +185,24 @@ where
     let found = RefCell::new(None);
     with_surface_tree_downward(
         surface,
-        location.into(),
-        |wl_surface, states, location: &Point<i32, Logical>| {
+        location.into().to_f64(),
+        |wl_surface, states, location: &Point<f64, Logical>| {
             let mut location = *location;
             let data = states.data_map.get::<RefCell<SurfaceState>>();
-
-            if states.role == Some("subsurface") {
-                let current = states.cached_state.current::<SubsurfaceCachedState>();
-                location += current.location;
-            }
+            let surface_view = surface_view(states);
+            location += surface_view.offset;
 
             if states.role == Some("subsurface") || surface_type.contains(WindowSurfaceType::TOPLEVEL) {
+                let surface_local_point = surface_view.point_to_local(point - location);
                 let contains_the_point = data
                     .map(|data| {
                         data.borrow()
-                            .contains_point(&*states.cached_state.current(), point - location.to_f64())
+                            .contains_point(&*states.cached_state.current(), surface_local_point)
                     })
                     .unwrap_or(false);
                 if contains_the_point {
-                    *found.borrow_mut() = Some((wl_surface.clone(), location));
+                    // TODO: Maybe the returned position should be a f64?
+                    *found.borrow_mut() = Some((wl_surface.clone(), location.to_i32_round()));
                 }
             }
 

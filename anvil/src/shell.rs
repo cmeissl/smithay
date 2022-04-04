@@ -359,6 +359,7 @@ pub fn init_shell<BackendData: Backend + 'static>(
                     // of a xdg_surface has to be sent during the commit if
                     // the surface is not already configured
                     let window = Window::new(SurfaceKind::Xdg(surface));
+                    window.override_size(Some((800, 600).into()));
                     place_new_window(&mut *state.space.borrow_mut(), &window, true);
                 }
 
@@ -954,29 +955,29 @@ fn surface_commit(surface: &wl_surface::WlSurface, space: &RefCell<Space>, popup
 }
 
 fn place_new_window(space: &mut Space, window: &Window, activate: bool) {
-    // place the window at a random location on the primary output
-    // or if there is not output in a [0;800]x[0;800] square
-    use rand::distributions::{Distribution, Uniform};
+    // // place the window at a random location on the primary output
+    // // or if there is not output in a [0;800]x[0;800] square
+    // use rand::distributions::{Distribution, Uniform};
 
-    let output = space.outputs().next().cloned();
-    let output_geometry = output
-        .and_then(|o| {
-            let geo = space.output_geometry(&o)?;
-            let map = layer_map_for_output(&o);
-            let zone = map.non_exclusive_zone();
-            Some(Rectangle::from_loc_and_size(geo.loc + zone.loc, zone.size))
-        })
-        .unwrap_or_else(|| Rectangle::from_loc_and_size((0, 0), (800, 800)));
+    // let output = space.outputs().next().cloned();
+    // let output_geometry = output
+    //     .and_then(|o| {
+    //         let geo = space.output_geometry(&o)?;
+    //         let map = layer_map_for_output(&o);
+    //         let zone = map.non_exclusive_zone();
+    //         Some(Rectangle::from_loc_and_size(geo.loc + zone.loc, zone.size))
+    //     })
+    //     .unwrap_or_else(|| Rectangle::from_loc_and_size((0, 0), (800, 800)));
 
-    let max_x = output_geometry.loc.x + (((output_geometry.size.w as f32) / 3.0) * 2.0) as i32;
-    let max_y = output_geometry.loc.y + (((output_geometry.size.h as f32) / 3.0) * 2.0) as i32;
-    let x_range = Uniform::new(output_geometry.loc.x, max_x);
-    let y_range = Uniform::new(output_geometry.loc.y, max_y);
-    let mut rng = rand::thread_rng();
-    let x = x_range.sample(&mut rng);
-    let y = y_range.sample(&mut rng);
+    // let max_x = output_geometry.loc.x + (((output_geometry.size.w as f32) / 3.0) * 2.0) as i32;
+    // let max_y = output_geometry.loc.y + (((output_geometry.size.h as f32) / 3.0) * 2.0) as i32;
+    // let x_range = Uniform::new(output_geometry.loc.x, max_x);
+    // let y_range = Uniform::new(output_geometry.loc.y, max_y);
+    // let mut rng = rand::thread_rng();
+    // let x = x_range.sample(&mut rng);
+    // let y = y_range.sample(&mut rng);
 
-    space.map_window(window, (x, y), activate);
+    space.map_window(window, (100, 100), activate);
 }
 
 pub fn fixup_positions(space: &mut Space) {
