@@ -179,9 +179,11 @@ pub struct SurfaceTransform {
     /// be used for cropping a surface tree
     pub src: Option<Rectangle<f64, Logical>>,
 
-    /// Defines an optional scale which should be used for
+    /// Defines an optional scale which will be used for
     /// rendering the surface tree
     pub scale: Option<Size<f64, Logical>>,
+
+    pub offset: Option<Point<f64, Logical>>,
 }
 
 impl SurfaceTransform {
@@ -193,6 +195,7 @@ impl SurfaceTransform {
 
         self.src = self.src.or(other.src);
         self.scale = self.scale.or(other.scale);
+        self.offset = other.offset;
 
         self
     }
@@ -437,6 +440,8 @@ fn update_surface_view(surface: &WlSurface) {
                             offset.x = offset.x.upscale(scale.w);
                             offset.y = offset.y.upscale(scale.h);
                         }
+
+                        offset += transform.offset.unwrap_or_default();
 
                         let mut dst = src.size;
 

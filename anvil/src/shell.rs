@@ -8,7 +8,7 @@ use smithay::{
     backend::renderer::utils::on_commit_buffer_handler,
     desktop::{
         layer_map_for_output, Kind as SurfaceKind, LayerSurface, PopupKeyboardGrab, PopupKind, PopupManager,
-        PopupPointerGrab, PopupUngrabStrategy, Space, Window,
+        PopupPointerGrab, PopupUngrabStrategy, Space, Window, default_constrain, zoom_constrain, fit_constrain, stretch_constrain,
     },
     reexports::{
         wayland_protocols::xdg_shell::server::xdg_toplevel,
@@ -359,7 +359,7 @@ pub fn init_shell<BackendData: Backend + 'static>(
                     // of a xdg_surface has to be sent during the commit if
                     // the surface is not already configured
                     let window = Window::new(SurfaceKind::Xdg(surface));
-                    window.override_size(Some((800, 600).into()));
+                    window.set_constrain((640, 480), fit_constrain);
                     place_new_window(&mut *state.space.borrow_mut(), &window, true);
                 }
 

@@ -553,6 +553,20 @@ pub struct Size<N, Kind> {
     _kind: std::marker::PhantomData<Kind>,
 }
 
+impl<N: Coordinate, Kind> PartialOrd<Size<N, Kind>> for Size<N, Kind> {
+    fn partial_cmp(&self, other: &Size<N, Kind>) -> Option<std::cmp::Ordering> {
+        match self.w.partial_cmp(&other.w) {
+            Some(core::cmp::Ordering::Equal) => {}
+            ord => return ord,
+        }
+        match self.h.partial_cmp(&other.h) {
+            Some(core::cmp::Ordering::Equal) => {}
+            ord => return ord,
+        }
+        self._kind.partial_cmp(&other._kind)
+    }
+}
+
 impl<N: Coordinate, Kind> Size<N, Kind> {
     /// Convert this [`Size`] to a [`Point`] with the same coordinates
     #[inline]

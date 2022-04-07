@@ -12,7 +12,7 @@ use crate::{
     },
 };
 use std::{
-    cell::Cell,
+    cell::{Cell, RefCell},
     hash::{Hash, Hasher},
     rc::Rc,
 };
@@ -84,14 +84,26 @@ impl Kind {
     }
 }
 
-#[derive(Debug)]
 pub(super) struct WindowInner {
     pub(super) id: usize,
     toplevel: Kind,
     bbox: Cell<Rectangle<i32, Logical>>,
     pub(super) z_index: Cell<Option<u8>>,
     user_data: UserDataMap,
-    size: Cell<Option<Size<i32, Logical>>>,
+    constrain: RefCell<Option<(Size<i32, Logical>, Box<dyn ConstrainBehavior>)>>,
+}
+
+impl std::fmt::Debug for WindowInner {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WindowInner")
+            .field("id", &self.id)
+            .field("toplevel", &self.toplevel)
+            .field("bbox", &self.bbox)
+            .field("z_index", &self.z_index)
+            .field("user_data", &self.user_data)
+            //.field("constrain", &self.constrain)
+            .finish()
+    }
 }
 
 impl Drop for WindowInner {
@@ -144,7 +156,8 @@ impl Window {
             bbox: Cell::new(Rectangle::from_loc_and_size((0, 0), (0, 0))),
             user_data: UserDataMap::new(),
             z_index: Cell::new(None),
-            size: Cell::new(None),
+            //size: Cell::new(None),
+            constrain: RefCell::new(None),
         }))
     }
 
@@ -160,9 +173,12 @@ impl Window {
             let mut geo = geometry.to_f64();
 
             if let Some(src) = transform.src {
-                // TODO: Move the bbox by the amount of how much
-                // has been effectively cropped
-                geo = geo.intersection(src).unwrap_or_default()
+                geo = geo.intersection(src).unwrap_or_default();
+                let pos_rect = Rectangle::from_extemities(
+                    (0.0, 0.0),
+                    (f64::max(geo.loc.x, 0.0), f64::max(geo.loc.y, 0.0)),
+                );
+                geo.loc -= src.loc.constrain(pos_rect);
             }
 
             if let Some(scale) = transform.scale {
@@ -171,6 +187,8 @@ impl Window {
                 geo.size.w = geo.size.w.upscale(scale.w);
                 geo.size.h = geo.size.h.upscale(scale.h);
             }
+
+            geo.loc += transform.offset.unwrap_or_default();
 
             geo.to_i32_up()
         })
@@ -189,9 +207,8 @@ impl Window {
             let mut bbox = bbox.to_f64();
 
             if let Some(src) = transform.src {
-                // TODO: Move the bbox by the amount of how much
-                // has been effectively cropped
-                bbox = bbox.intersection(src).unwrap_or_default()
+                bbox = bbox.intersection(src).unwrap_or_default();
+                bbox.loc = Point::from((f64::min(bbox.loc.x, 0.0), f64::min(bbox.loc.y, 0.0)));
             }
 
             if let Some(scale) = transform.scale {
@@ -200,6 +217,8 @@ impl Window {
                 bbox.size.w = bbox.size.w.upscale(scale.w);
                 bbox.size.h = bbox.size.h.upscale(scale.h);
             }
+
+            bbox.loc += transform.offset.unwrap_or_default();
 
             bbox.to_i32_up()
         })
@@ -283,22 +302,51 @@ impl Window {
             None => return,
         };
 
-        self.0.bbox.set(bbox_from_surface_tree(surface, (0, 0)));
+        let bbox = bbox_from_surface_tree(surface, (0, 0));
+        self.0.bbox.set(bbox);
 
-        let geometry = self.real_geometry();
-        let transform = if geometry.size.w > 0 && geometry.size.h > 0 {
-            let scale = if let Some(size) = self.0.size.get() {
-                let scale: Size<f64, Logical> = Size::from((
-                    size.w as f64 / geometry.size.w as f64,
-                    size.h as f64 / geometry.size.h as f64,
-                ));
+        if bbox.size.w <= 0 || bbox.size.h <= 0 {
+            return;
+        }
 
-                Some(scale)
+        let transform = if let Some((size, behavior)) = self.0.constrain.borrow().as_ref() {
+            let rect = (*behavior).constrain(self, bbox.size, *size);
+            let constrain_rect = Rectangle::from_loc_and_size((0.0, 0.0), size.to_f64());
+            if let Some(intersection) = rect.intersection(constrain_rect) {
+                // Calculate the scale between the real window size
+                // and the size the constraint wants the window to have
+                let bbox_scale: Size<f64, Logical> =
+                    Size::from((bbox.size.w as f64 / rect.size.w, bbox.size.h as f64 / rect.size.h));
+
+                // Calculate how much the constraint wants to crop from
+                // the size it selected
+                let mut left_top_crop: Point<f64, Logical> =
+                    Point::from((-f64::min(rect.loc.x, 0.0), -f64::min(rect.loc.y, 0.0)));
+
+                // Scale the crop to bbox size
+                left_top_crop.x = left_top_crop.x.upscale(bbox_scale.w);
+                left_top_crop.y = left_top_crop.y.upscale(bbox_scale.h);
+
+                let mut size = intersection.size;
+                size.w = size.w.upscale(bbox_scale.w);
+                size.h = size.h.upscale(bbox_scale.h);
+
+                let src: Rectangle<f64, Logical> =
+                    Rectangle::from_loc_and_size(bbox.loc.to_f64() + left_top_crop, size);
+
+                let scale = Size::from((intersection.size.w / src.size.w, intersection.size.h / src.size.h));
+
+                // Calculate the offset
+                let offset = intersection.loc;
+
+                SurfaceTransform {
+                    src: Some(src),
+                    scale: Some(scale),
+                    offset: Some(offset),
+                }
             } else {
-                None
-            };
-
-            SurfaceTransform { src: None, scale }
+                SurfaceTransform::default()
+            }
         } else {
             SurfaceTransform::default()
         };
@@ -383,15 +431,23 @@ impl Window {
         self.0.z_index.take();
     }
 
-    /// Allows to override the size of the window on screen
-    ///
-    /// This will internally calculate the [`SurfaceTransform`]
-    /// based on the real geometry of the window and the
-    /// specified size.
-    ///
-    /// To unset the size override pass [`None`]
-    pub fn override_size(&self, size: Option<Size<i32, Logical>>) {
-        self.0.size.set(size);
+    /// Allows to define a constrain and [`ConstrainBehavior`] that
+    /// will be applied to the window.
+    pub fn set_constrain<S, B>(&self, size: S, behavior: B)
+    where
+        S: Into<Size<i32, Logical>>,
+        B: ConstrainBehavior + 'static,
+    {
+        self.0
+            .constrain
+            .borrow_mut()
+            .replace((size.into(), Box::new(behavior)));
+        self.refresh();
+    }
+
+    /// Clears the current constrain
+    pub fn clear_constrain(&self) {
+        self.0.constrain.take();
         self.refresh();
     }
 
@@ -418,6 +474,122 @@ impl Window {
             // This updates dynamically on every commit. This unset is meant for extremely simple clients.
             bbox
         }
+    }
+}
+
+/// Defines a behavior for constraining a window
+/// within a defined size
+pub trait ConstrainBehavior {
+    /// TODO: Docs
+    fn constrain(
+        &self,
+        window: &Window,
+        window_size: Size<i32, Logical>,
+        constrain_size: Size<i32, Logical>,
+    ) -> Rectangle<f64, Logical>;
+}
+
+/// TODO: Docs
+pub fn default_constrain(
+    _window: &Window,
+    window_size: Size<i32, Logical>,
+    constrain_size: Size<i32, Logical>,
+) -> Rectangle<f64, Logical> {
+    let constrain_size = constrain_size.to_f64();
+    let window_size = window_size.to_f64();
+
+    // First we calculate the size we want the window to have
+    let size = if window_size <= constrain_size {
+        // No need to scale, we will just center the window
+        constrain_size
+    } else {
+        // Scale the window into the size while keeping the
+        // aspect ratio and center it
+        let width_scale = constrain_size.w / window_size.w;
+        let height_scale = constrain_size.h / window_size.h;
+
+        let scale_for_fit = f64::min(width_scale, height_scale);
+
+        Size::from((window_size.w * scale_for_fit, window_size.h * scale_for_fit))
+    };
+
+    // Then we center the window within the defined size
+    let left = (constrain_size.w - size.w) / 2.0;
+    let top = (constrain_size.h - size.h) / 2.0;
+
+    Rectangle::from_loc_and_size((left, top), size)
+}
+
+/// TODO: Docs
+pub fn fit_constrain(
+    _window: &Window,
+    window_size: Size<i32, Logical>,
+    constrain_size: Size<i32, Logical>,
+) -> Rectangle<f64, Logical> {
+    let constrain_size = constrain_size.to_f64();
+    let window_size = window_size.to_f64();
+
+    // Scale the window into the size while keeping the
+    // aspect ratio and center it
+    let width_scale = constrain_size.w / window_size.w;
+    let height_scale = constrain_size.h / window_size.h;
+
+    let scale_for_fit = f64::min(width_scale, height_scale);
+
+    let size = Size::from((window_size.w * scale_for_fit, window_size.h * scale_for_fit));
+
+    // Then we center the window within the defined size
+    let left = (constrain_size.w - size.w) / 2.0;
+    let top = (constrain_size.h - size.h) / 2.0;
+
+    Rectangle::from_loc_and_size((left, top), size)
+}
+
+/// TODO: Docs
+pub fn stretch_constrain(
+    _window: &Window,
+    _window_size: Size<i32, Logical>,
+    constrain_size: Size<i32, Logical>,
+) -> Rectangle<f64, Logical> {
+    Rectangle::from_loc_and_size((0.0, 0.0), constrain_size.to_f64())
+}
+
+/// TODO: Docs
+pub fn zoom_constrain(
+    _window: &Window,
+    window_size: Size<i32, Logical>,
+    constrain_size: Size<i32, Logical>,
+) -> Rectangle<f64, Logical> {
+    let constrain_size = constrain_size.to_f64();
+    let window_size = window_size.to_f64();
+
+    // Scale the window into the size while keeping the
+    // aspect ratio and center it
+    let width_scale = constrain_size.w / window_size.w;
+    let height_scale = constrain_size.h / window_size.h;
+
+    let scale_for_fit = f64::max(width_scale, height_scale);
+
+    let size = Size::from((window_size.w * scale_for_fit, window_size.h * scale_for_fit));
+
+    // Then we center the window within the defined size
+    let left = (constrain_size.w - size.w) / 2.0;
+    let top = (constrain_size.h - size.h) / 2.0;
+
+    Rectangle::from_loc_and_size((left, top), size)
+}
+
+impl<T> ConstrainBehavior for T
+where
+    T: Fn(&Window, Size<i32, Logical>, Size<i32, Logical>) -> Rectangle<f64, Logical>,
+{
+    fn constrain(
+        &self,
+        window: &Window,
+        window_size: Size<i32, Logical>,
+        constrain_size: Size<i32, Logical>,
+    ) -> Rectangle<f64, Logical> {
+        self(window, window_size, constrain_size)
     }
 }
 
