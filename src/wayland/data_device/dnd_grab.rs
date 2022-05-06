@@ -53,15 +53,12 @@ impl DnDGrab {
 impl PointerGrab for DnDGrab {
     fn motion(
         &mut self,
-        handle: &mut PointerInnerHandle<'_>,
+        _handle: &mut PointerInnerHandle<'_>,
         location: Point<f64, Logical>,
         focus: Option<(wl_surface::WlSurface, Point<i32, Logical>)>,
         serial: Serial,
         time: u32,
     ) {
-        // While the grab is active, no client has pointer focus
-        handle.motion(location, None, serial, time);
-
         let seat_data = self
             .seat
             .user_data()

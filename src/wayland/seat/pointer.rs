@@ -91,12 +91,11 @@ impl PointerInternal {
         }
     }
 
-    fn set_grab<G: PointerGrab + 'static>(&mut self, serial: Serial, grab: G, time: u32) {
+    fn set_grab<G: PointerGrab + 'static>(&mut self, serial: Serial, grab: G, unfocus: bool) {
         self.grab = GrabStatus::Active(serial, Box::new(grab));
-        // generate a move to let the grab change the focus or move the pointer as result of its initialization
-        let location = self.location;
-        let focus = self.focus.clone();
-        self.motion(location, focus, serial, time);
+        if unfocus {
+            self.motion(self.location, None, serial, 0);
+        }
     }
 
     fn unset_grab(&mut self, serial: Serial, time: u32) {
@@ -230,8 +229,8 @@ impl PointerHandle {
     /// Change the current grab on this pointer to the provided grab
     ///
     /// Overwrites any current grab.
-    pub fn set_grab<G: PointerGrab + 'static>(&self, grab: G, serial: Serial, time: u32) {
-        self.inner.borrow_mut().set_grab(serial, grab, time);
+    pub fn set_grab<G: PointerGrab + 'static>(&self, grab: G, serial: Serial, unfocus: bool) {
+        self.inner.borrow_mut().set_grab(serial, grab, unfocus);
     }
 
     /// Remove any current grab on this pointer, resetting it to the default behavior
@@ -402,8 +401,8 @@ impl<'a> PointerInnerHandle<'a> {
     /// Change the current grab on this pointer to the provided grab
     ///
     /// Overwrites any current grab.
-    pub fn set_grab<G: PointerGrab + 'static>(&mut self, serial: Serial, grab: G, time: u32) {
-        self.inner.set_grab(serial, grab, time);
+    pub fn set_grab<G: PointerGrab + 'static>(&mut self, serial: Serial, grab: G, unfocus: bool) {
+        self.inner.set_grab(serial, grab, unfocus);
     }
 
     /// Remove any current grab on this pointer, resetting it to the default behavior
@@ -724,7 +723,7 @@ impl PointerGrab for DefaultGrab {
                         location: handle.current_location(),
                     },
                 },
-                time,
+                false,
             );
         }
     }
