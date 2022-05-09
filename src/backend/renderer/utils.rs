@@ -3,9 +3,12 @@
 use crate::{
     backend::renderer::{buffer_dimensions, Frame, ImportAll, Renderer},
     utils::{Buffer, Coordinate, Logical, Point, Rectangle, Scale, Size, Transform},
-    wayland::compositor::{
-        is_sync_subsurface, with_surface_tree_upward, BufferAssignment, Damage, SubsurfaceCachedState,
-        SurfaceAttributes, SurfaceData, TraversalAction,
+    wayland::{
+        compositor::{
+            is_sync_subsurface, with_surface_tree_upward, BufferAssignment, Damage, SubsurfaceCachedState,
+            SurfaceAttributes, SurfaceData, TraversalAction,
+        },
+        viewporter,
     },
 };
 use std::collections::VecDeque;
@@ -55,6 +58,13 @@ impl SurfaceState {
                 }
                 self.textures.clear();
                 self.commit_count = self.commit_count.wrapping_add(1);
+                // TODO: This is probably wrong in combination with viewporter
+                // as the surface damage is already in logical coordinates.
+                // Maybe we should change the buffer_damage to Logical, most
+                // of the components already use Logical damage, only the import part
+                // would have to convert it back to buffer.
+                // draw_surface_tree already receives logical damage which is converted
+                // back to buffer damage by using the SurfaceView
                 let mut buffer_damage = attrs
                     .damage
                     .drain(..)
@@ -123,6 +133,9 @@ impl SurfaceState {
     }
 
     /// Returns the size of the surface.
+    ///
+    /// TODO: Maybe this function should be removed all together or
+    /// at least renamed as it does not and can not consider viewporter
     pub fn surface_size(&self) -> Option<Size<i32, Logical>> {
         self.buffer_dimensions
             .as_ref()
@@ -221,9 +234,12 @@ fn update_surface_view(surface: &WlSurface) {
                         Default::default()
                     };
 
-                    // TODO: Take wp_viewporter into account
-                    let src = Rectangle::from_loc_and_size((0.0, 0.0), size.to_f64());
-                    let dst = size.to_f64();
+                    viewporter::ensure_viewport_valid(states, size);
+                    let viewport = states.cached_state.current::<viewporter::ViewportCachedState>();
+                    let src = viewport
+                        .src
+                        .unwrap_or_else(|| Rectangle::from_loc_and_size((0.0, 0.0), size.to_f64()));
+                    let dst = viewport.size().unwrap_or(size).to_f64();
 
                     SurfaceView { src, dst, offset }
                 } else {

@@ -65,6 +65,7 @@ pub mod shm;
 pub mod tablet_manager;
 pub mod xdg_activation;
 pub mod xdg_foreign;
+pub mod viewporter;
 
 /// A global [`SerialCounter`] for use in your compositor.
 ///
