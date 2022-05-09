@@ -181,43 +181,6 @@ impl SurfaceView {
         rect.upscale(scale)
     }
 
-    // pub(crate) fn rect_to_local<N>(&self, rect: Rectangle<N, Logical>) -> Rectangle<f64, Logical>
-    // where
-    //     N: Coordinate,
-    // {
-    //     let (scale_x, scale_y) = self.scale();
-    //     let mut rect = rect.to_f64();
-    //     rect.loc.x = rect.loc.x.downscale(scale_x);
-    //     rect.loc.y = rect.loc.y.downscale(scale_y);
-    //     rect.size.w = rect.size.w.downscale(scale_x);
-    //     rect.size.h = rect.size.h.downscale(scale_y);
-    //     rect.loc += self.src.loc;
-    //     rect
-    // }
-
-    // pub(crate) fn point_to_global<N>(&self, point: Point<N, Logical>) -> Point<f64, Logical>
-    // where
-    //     N: Coordinate,
-    // {
-    //     let (scale_x, scale_y) = self.scale();
-    //     let mut point = point.to_f64();
-    //     point -= self.src.loc;
-    //     point.x = point.x.upscale(scale_x);
-    //     point.y = point.y.upscale(scale_y);
-    //     point
-    // }
-
-    pub(crate) fn point_to_local<N>(&self, point: Point<N, Logical>) -> Point<f64, Logical>
-    where
-        N: Coordinate,
-    {
-        let scale = self.scale();
-        let mut point = point.to_f64();
-        point = point.downscale(scale);
-        point += self.src.loc;
-        point
-    }
-
     pub(crate) fn downscale_rect<N: Coordinate>(
         &self,
         rect: Rectangle<N, Logical>,
@@ -452,7 +415,6 @@ where
             let mut surface_offset = *surface_offset;
             if let Some(data) = states.data_map.get::<RefCell<SurfaceState>>() {
                 let mut data = data.borrow_mut();
-                let dimensions = data.surface_size();
                 let buffer_scale = data.buffer_scale;
                 let attributes = states.cached_state.current::<SurfaceAttributes>();
                 if let Some(texture) = data
@@ -466,8 +428,6 @@ where
                     // Move the src rect relative to the surface
                     let mut src = src;
                     src.loc -= surface_offset + surface_view.offset;
-
-                    let dimensions = dimensions.unwrap();
 
                     // We use the surface view dst size here as this is the size
                     // the surface would be rendered on screen without applying the

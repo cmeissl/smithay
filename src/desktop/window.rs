@@ -91,7 +91,7 @@ impl Kind {
 ///
 /// This applies to the whole surface tree and will
 /// override all transforms on it's children.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct WindowTransform {
     /// Defines an optional source [`Rectangle`] that can
     /// be used for cropping a window
@@ -323,52 +323,40 @@ impl Window {
             return;
         }
 
-        // let transform = if let Some((size, behavior)) = self.0.constrain.borrow().as_ref() {
-        //     let rect = (*behavior).constrain(self, bbox.size, *size);
-        //     let constrain_rect = Rectangle::from_loc_and_size((0.0, 0.0), size.to_f64());
-        //     if let Some(intersection) = rect.intersection(constrain_rect) {
-        //         // Calculate the scale between the real window size
-        //         // and the size the constraint wants the window to have
-        //         let bbox_scale: Size<f64, Logical> =
-        //             Size::from((bbox.size.w as f64 / rect.size.w, bbox.size.h as f64 / rect.size.h));
+        let geometry = self.real_geometry();
 
-        //         // Calculate how much the constraint wants to crop from
-        //         // the size it selected
-        //         let mut left_top_crop: Point<f64, Logical> =
-        //             Point::from((-f64::min(rect.loc.x, 0.0), -f64::min(rect.loc.y, 0.0)));
+        let transform = if let Some((size, behavior)) = self.0.constrain.borrow().as_ref() {
+            let rect = (*behavior).constrain(self, geometry.size, *size);
+            let constrain_rect = Rectangle::from_loc_and_size((0.0, 0.0), size.to_f64());
 
-        //         // Scale the crop to bbox size
-        //         left_top_crop.x = left_top_crop.x.upscale(bbox_scale.w);
-        //         left_top_crop.y = left_top_crop.y.upscale(bbox_scale.h);
+            if let Some(intersection) = constrain_rect.intersection(rect) {
+                // Calculate the scale between the real window size
+                // and the size the constraint wants the window to have
+                let window_scale: Scale<f64> = Scale::from((
+                    geometry.size.w as f64 / rect.size.w,
+                    geometry.size.h as f64 / rect.size.h,
+                ));
 
-        //         let mut size = intersection.size;
-        //         size.w = size.w.upscale(bbox_scale.w);
-        //         size.h = size.h.upscale(bbox_scale.h);
+                // Calculate how much the constraint wants to crop from
+                // the size it selected
+                let left_top_crop: Point<f64, Logical> =
+                    Point::from((-f64::min(rect.loc.x, 0.0), -f64::min(rect.loc.y, 0.0)))
+                        .upscale(window_scale);
+                let size = intersection.size.upscale(window_scale);
+                let src = Rectangle::from_loc_and_size(geometry.loc.to_f64() + left_top_crop, size);
 
-        //         let src: Rectangle<f64, Logical> =
-        //             Rectangle::from_loc_and_size(bbox.loc.to_f64() + left_top_crop, size);
+                let scale = Scale::from((intersection.size.w / src.size.w, intersection.size.h / src.size.h));
 
-        //         let scale = Size::from((intersection.size.w / src.size.w, intersection.size.h / src.size.h));
-
-        //         // Calculate the offset
-        //         //let offset = intersection.loc;
-
-        //         SurfaceTransform {
-        //             src: Some(src),
-        //             scale: Some(scale),
-        //             offset: None,
-        //         }
-        //     } else {
-        //         SurfaceTransform::default()
-        //     }
-        // } else {
-        //     SurfaceTransform::default()
-        // };
-
-        let transform = WindowTransform {
-            src: Some(self.real_geometry().to_f64()),
-            scale: (1.0, 0.5).into(),
-            offset: (0.0, 0.0).into(),
+                WindowTransform {
+                    src: Some(src),
+                    scale,
+                    offset: intersection.loc,
+                }
+            } else {
+                WindowTransform::default()
+            }
+        } else {
+            WindowTransform::default()
         };
         self.0.transform.set(transform);
 
