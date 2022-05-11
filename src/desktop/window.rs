@@ -1,6 +1,6 @@
 use crate::{
     backend::renderer::{
-        utils::{draw_surface_tree, surface_view},
+        utils::{draw_surface_tree, SurfaceState},
         ImportAll, Renderer,
     },
     desktop::{utils::*, PopupManager, Space},
@@ -369,36 +369,41 @@ impl Window {
             (Point::from((0.0, 0.0)), None),
             |_, states, (surface_offset, parent_crop)| {
                 let mut surface_offset = *surface_offset;
+                let data = states.data_map.get::<RefCell<SurfaceState>>();
 
-                let surface_view = surface_view(states);
+                if let Some(surface_view) = data.and_then(|d| d.borrow().surface_view) {
+                    // Move the src rect relative to the surface
+                    let mut src = src;
+                    src.loc -= surface_offset + surface_view.offset;
 
-                // Move the src rect relative to the surface
-                let mut src = src;
-                src.loc -= surface_offset + surface_view.offset;
+                    let surface_rect = Rectangle::from_loc_and_size((0., 0.), surface_view.dst);
+                    if let Some(intersection) = surface_rect.intersection(src) {
+                        let mut offset = surface_view.offset;
 
-                let surface_rect = Rectangle::from_loc_and_size((0., 0.), surface_view.dst);
-                let intersection = surface_rect.intersection(src).unwrap_or_default();
+                        // Correct the offset by the (parent)crop
+                        if let Some(parent_crop) = *parent_crop {
+                            offset = (offset + intersection.loc) - parent_crop;
+                        }
 
-                let mut offset = surface_view.offset;
+                        surface_offset += offset;
 
-                // Correct the offset by the (parent)crop
-                if let Some(parent_crop) = *parent_crop {
-                    offset = (offset + intersection.loc) - parent_crop;
+                        states
+                            .data_map
+                            .insert_if_missing(|| RefCell::new(InputTransform::default()));
+                        let mut input_transform = states
+                            .data_map
+                            .get::<RefCell<InputTransform>>()
+                            .unwrap()
+                            .borrow_mut();
+                        input_transform.scale = (1.0 / transform.scale.x, 1.0 / transform.scale.y).into();
+                        input_transform.offset = intersection.loc;
+                        TraversalAction::DoChildren((surface_offset, Some(intersection.loc)))
+                    } else {
+                        TraversalAction::SkipChildren
+                    }
+                } else {
+                    TraversalAction::SkipChildren
                 }
-
-                surface_offset += offset;
-
-                states
-                    .data_map
-                    .insert_if_missing(|| RefCell::new(InputTransform::default()));
-                let mut input_transform = states
-                    .data_map
-                    .get::<RefCell<InputTransform>>()
-                    .unwrap()
-                    .borrow_mut();
-                input_transform.scale = (1.0 / transform.scale.x, 1.0 / transform.scale.y).into();
-                input_transform.offset = intersection.loc;
-                TraversalAction::DoChildren((surface_offset, Some(intersection.loc)))
             },
             |_, _, _| {},
             |_, _, _| true,

@@ -360,7 +360,9 @@ impl<A: GraphicsApi> GpuManager<A> {
                     let data = &mut *data_ref;
                     let attributes = states.cached_state.current::<SurfaceAttributes>();
                     // Import a new buffer if available
-                    let surface_size = data.surface_size();
+                    let surface_size = data
+                        .buffer_dimensions
+                        .map(|d| d.to_logical(data.buffer_scale, data.buffer_transform));
                     if let Some(buffer) = data.buffer.as_ref() {
                         let surface_size = surface_size.unwrap();
                         let buffer_damage = attributes

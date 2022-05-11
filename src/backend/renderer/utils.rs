@@ -29,6 +29,7 @@ pub(crate) struct SurfaceState {
     pub(crate) damage: VecDeque<Vec<Rectangle<i32, Buffer>>>,
     pub(crate) renderer_seen: HashMap<(TypeId, usize), usize>,
     pub(crate) textures: HashMap<(TypeId, usize), Box<dyn std::any::Any>>,
+    pub(crate) surface_view: Option<SurfaceView>,
     #[cfg(feature = "desktop")]
     pub(crate) space_seen: HashMap<crate::desktop::space::SpaceOutputHash, usize>,
 }
@@ -36,18 +37,13 @@ pub(crate) struct SurfaceState {
 const MAX_DAMAGE: usize = 4;
 
 impl SurfaceState {
-    pub fn update_buffer(&mut self, attrs: &mut SurfaceAttributes) {
+    pub fn update_buffer(&mut self, states: &SurfaceData) {
+        let mut attrs = states.cached_state.current::<SurfaceAttributes>();
+
         match attrs.buffer.take() {
             Some(BufferAssignment::NewBuffer { buffer, .. }) => {
                 // new contents
                 self.buffer_dimensions = buffer_dimensions(&buffer);
-
-                #[cfg(feature = "desktop")]
-                if self.buffer_scale != attrs.buffer_scale
-                    || self.buffer_transform != attrs.buffer_transform.into()
-                {
-                    self.reset_space_damage();
-                }
                 self.buffer_scale = attrs.buffer_scale;
                 self.buffer_transform = attrs.buffer_transform.into();
 
@@ -58,24 +54,22 @@ impl SurfaceState {
                 }
                 self.textures.clear();
                 self.commit_count = self.commit_count.wrapping_add(1);
-                // TODO: This is probably wrong in combination with viewporter
-                // as the surface damage is already in logical coordinates.
-                // Maybe we should change the buffer_damage to Logical, most
-                // of the components already use Logical damage, only the import part
-                // would have to convert it back to buffer.
-                // draw_surface_tree already receives logical damage which is converted
-                // back to buffer damage by using the SurfaceView
+
+                let surface_size = self
+                    .buffer_dimensions
+                    .unwrap()
+                    .to_logical(self.buffer_scale, self.buffer_transform);
+                self.surface_view = Some(SurfaceView::from_states(states, surface_size));
+
                 let mut buffer_damage = attrs
                     .damage
                     .drain(..)
                     .flat_map(|dmg| {
                         match dmg {
                             Damage::Buffer(rect) => rect,
-                            Damage::Surface(rect) => rect.to_buffer(
-                                self.buffer_scale,
-                                self.buffer_transform,
-                                &self.surface_size().unwrap(),
-                            ),
+                            Damage::Surface(rect) => {
+                                rect.to_buffer(self.buffer_scale, self.buffer_transform, &surface_size)
+                            }
                         }
                         .intersection(Rectangle::from_loc_and_size(
                             (0, 0),
@@ -96,6 +90,7 @@ impl SurfaceState {
                 self.textures.clear();
                 self.commit_count = self.commit_count.wrapping_add(1);
                 self.damage.clear();
+                self.surface_view = None;
             }
             None => {}
         }
@@ -126,21 +121,6 @@ impl SurfaceState {
                 .unwrap_or_else(Vec::new)
         }
     }
-
-    #[cfg(feature = "desktop")]
-    pub fn reset_space_damage(&mut self) {
-        self.space_seen.clear();
-    }
-
-    /// Returns the size of the surface.
-    ///
-    /// TODO: Maybe this function should be removed all together or
-    /// at least renamed as it does not and can not consider viewporter
-    pub fn surface_size(&self) -> Option<Size<i32, Logical>> {
-        self.buffer_dimensions
-            .as_ref()
-            .map(|dim| dim.to_logical(self.buffer_scale, self.buffer_transform))
-    }
 }
 
 /// Handler to let smithay take over buffer management.
@@ -167,12 +147,10 @@ pub fn on_commit_buffer_handler(surface: &WlSurface) {
                     .get::<RefCell<SurfaceState>>()
                     .unwrap()
                     .borrow_mut();
-                data.update_buffer(&mut *states.cached_state.current::<SurfaceAttributes>());
+                data.update_buffer(states);
             },
             |_, _, _| true,
         );
-
-        update_surface_view(surface);
     }
 }
 
@@ -205,75 +183,25 @@ impl SurfaceView {
     fn scale(&self) -> Scale<f64> {
         Scale::from((self.dst.w / self.src.size.w, self.dst.h / self.src.size.h))
     }
-}
 
-pub(crate) fn surface_view(states: &SurfaceData) -> SurfaceView {
-    states
-        .data_map
-        .get::<RefCell<SurfaceView>>()
-        .map(|view| *view.borrow())
-        .unwrap_or_default()
-}
-
-fn update_surface_view(surface: &WlSurface) {
-    with_surface_tree_upward(
-        surface,
-        (),
-        |_, states, _| {
-            if let Some(data) = states.data_map.get::<RefCell<SurfaceState>>() {
-                let mut data = data.borrow_mut();
-
-                let surface_view = if let Some(size) = data.surface_size() {
-                    let offset = if states.role == Some("subsurface") {
-                        states
-                            .cached_state
-                            .current::<SubsurfaceCachedState>()
-                            .location
-                            .to_f64()
-                    } else {
-                        Default::default()
-                    };
-
-                    viewporter::ensure_viewport_valid(states, size);
-                    let viewport = states.cached_state.current::<viewporter::ViewportCachedState>();
-                    let src = viewport
-                        .src
-                        .unwrap_or_else(|| Rectangle::from_loc_and_size((0.0, 0.0), size.to_f64()));
-                    let dst = viewport.size().unwrap_or(size).to_f64();
-
-                    SurfaceView { src, dst, offset }
-                } else {
-                    SurfaceView::default()
-                };
-
-                states
-                    .data_map
-                    .insert_if_missing(|| RefCell::new(SurfaceView::default()));
-                let mut current_surface_view = states
-                    .data_map
-                    .get::<RefCell<SurfaceView>>()
-                    .unwrap()
-                    .borrow_mut();
-
-                #[cfg(feature = "desktop")]
-                if surface_view != *current_surface_view {
-                    // In case the surface view has changed reset
-                    // the space damage seen to update the whole surface
-                    // TODO: This is probably not enough in case the offset has
-                    // changed as we would need to damage the old location too.
-                    // A simple workaround could be to also reset the damage
-                    // of the parent.
-                    data.reset_space_damage()
-                }
-
-                *current_surface_view = surface_view;
-            }
-
-            TraversalAction::DoChildren(())
-        },
-        |_, _, _| {},
-        |_, _, _| true,
-    );
+    fn from_states(states: &SurfaceData, surface_size: Size<i32, Logical>) -> SurfaceView {
+        viewporter::ensure_viewport_valid(states, surface_size);
+        let viewport = states.cached_state.current::<viewporter::ViewportCachedState>();
+        let src = viewport
+            .src
+            .unwrap_or_else(|| Rectangle::from_loc_and_size((0.0, 0.0), surface_size.to_f64()));
+        let dst = viewport.size().unwrap_or(surface_size).to_f64();
+        let offset = if states.role == Some("subsurface") {
+            states
+                .cached_state
+                .current::<SubsurfaceCachedState>()
+                .location
+                .to_f64()
+        } else {
+            Default::default()
+        };
+        SurfaceView { src, dst, offset }
+    }
 }
 
 /// Imports buffers of a surface and its subsurfaces using a given [`Renderer`].
@@ -347,7 +275,7 @@ where
                 // Now, should we be drawn ?
                 if data.textures.contains_key(&texture_id) {
                     // if yes, also process the children
-                    let surface_view = surface_view(states);
+                    let surface_view = data.surface_view.unwrap();
 
                     // Move the src rect relative to the surface
                     let mut src = src;
@@ -432,14 +360,14 @@ where
             if let Some(data) = states.data_map.get::<RefCell<SurfaceState>>() {
                 let mut data = data.borrow_mut();
                 let buffer_scale = data.buffer_scale;
+                let surface_view = data.surface_view;
                 let attributes = states.cached_state.current::<SurfaceAttributes>();
                 if let Some(texture) = data
                     .textures
                     .get_mut(&texture_id)
                     .and_then(|x| x.downcast_mut::<<R as Renderer>::TextureId>())
                 {
-                    // if yes, also process the children
-                    let surface_view = surface_view(states);
+                    let surface_view = surface_view.unwrap();
 
                     // Move the src rect relative to the surface
                     let mut src = src;
