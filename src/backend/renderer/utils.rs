@@ -343,6 +343,7 @@ where
     <R as Renderer>::TextureId: 'static,
 {
     let surface_scale = surface_scale.into();
+    let initial_location = location;
     let location = location.to_f64().to_physical(output_scale);
     let src = src.unwrap_or_else(|| {
         Rectangle::from_loc_and_size((f64::MIN, f64::MIN), (f64::INFINITY, f64::INFINITY))
@@ -399,19 +400,21 @@ where
                         // first move the damage by the surface offset in logical space
                         .map(|geo| {
                             let mut geo = geo.to_f64();
-                            // make the damage relative to the surface
-                            geo.loc -= surface_offset.upscale(surface_scale).to_i32_floor::<f64>();
-                            geo
+                            geo.loc += initial_location.to_f64();
+                            geo.to_physical(output_scale).to_i32_up()
                         })
                         // then clamp to surface size again in logical space
                         .flat_map(|geo| {
                             geo.intersection(Rectangle::from_loc_and_size(
-                                (0., 0.),
-                                intersection.size.upscale(surface_scale).to_i32_ceil::<f64>(),
+                                (initial_location.to_f64() + surface_offset).to_physical(output_scale),
+                                intersection.size.upscale(surface_scale).to_physical(output_scale),
                             ))
                         })
                         // lastly transform it into physical space
-                        .map(|geo| geo.to_physical(output_scale))
+                        .map(|mut geo| { 
+                            geo.loc -= (initial_location.to_f64() + surface_offset).to_physical(output_scale);
+                            geo
+                        })
                         .collect::<Vec<_>>();
 
                     if damage.is_empty() {

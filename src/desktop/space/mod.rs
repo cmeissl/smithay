@@ -572,7 +572,7 @@ impl Space {
                         // Map from global space to output space
                         .map(|geo| Rectangle::from_loc_and_size(geo.loc - output_geo.loc, geo.size))
                         // Map from logical to physical
-                        .map(|geo| geo.to_f64().to_physical(output_scale))
+                        .map(|geo| geo.to_f64().to_physical(output_scale).to_i32_up())
                         .collect::<Vec<_>>(),
                 )?;
                 // Then re-draw all windows & layers overlapping with a damage rect.

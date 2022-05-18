@@ -231,12 +231,11 @@ where
 
                         damage.extend(new_damage.into_iter().flat_map(|rect| {
                             // First bring the buffer damage to logical space
-                            rect.to_logical(
-                                data.buffer_scale,
+                            rect.to_f64().to_logical(
+                                data.buffer_scale as f64,
                                 data.buffer_transform,
-                                &data.buffer_dimensions.unwrap(),
+                                &data.buffer_dimensions.unwrap().to_f64(),
                             )
-                            .to_f64()
                             // Then crop by the src ignoring any damage outside of it
                             .intersection(surface_view.src)
                             .map(|rect| {
