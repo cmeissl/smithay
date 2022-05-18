@@ -161,7 +161,8 @@ pub trait Frame {
                     .size()
                     .to_logical(texture_scale, src_transform)
                     .to_f64()
-                    .to_physical(output_scale),
+                    .to_physical(output_scale)
+                    .to_i32_round(),
             ),
             damage,
             src_transform,
