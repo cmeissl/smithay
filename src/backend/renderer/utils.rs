@@ -2,7 +2,7 @@
 
 use crate::{
     backend::renderer::{buffer_dimensions, Frame, ImportAll, Renderer},
-    utils::{Buffer, Coordinate, Logical, Point, Rectangle, Scale, Size, Transform},
+    utils::{Buffer, Coordinate, Logical, Physical, Point, Rectangle, Scale, Size, Transform},
     wayland::{
         compositor::{
             is_sync_subsurface, with_surface_tree_upward, BufferAssignment, Damage, SubsurfaceCachedState,
@@ -18,6 +18,7 @@ use std::{
     collections::{hash_map::Entry, HashMap},
 };
 use wayland_server::protocol::{wl_buffer::WlBuffer, wl_surface::WlSurface};
+
 #[derive(Default)]
 pub(crate) struct SurfaceState {
     pub(crate) commit_count: usize,
@@ -225,29 +226,31 @@ where
     R: Renderer + ImportAll,
     <R as Renderer>::TextureId: 'static,
 {
-    import_surface_tree_and(renderer, surface, log, (0, 0).into(), |_, _, _| {})
+    import_surface_tree_and(renderer, surface, 1.0, log, (0, 0).into(), |_, _, _| {})
 }
 
-fn import_surface_tree_and<F, R>(
+fn import_surface_tree_and<F, R, S>(
     renderer: &mut R,
     surface: &WlSurface,
+    scale: S,
     log: &slog::Logger,
-    location: Point<i32, Logical>,
+    location: Point<i32, Physical>,
     processor: F,
 ) -> Result<(), <R as Renderer>::Error>
 where
     R: Renderer + ImportAll,
     <R as Renderer>::TextureId: 'static,
-    F: FnMut(&WlSurface, &SurfaceData, &(Point<i32, Logical>, Point<i32, Logical>)),
+    S: Into<Scale<f64>>,
+    F: FnMut(&WlSurface, &SurfaceData, &Point<i32, Physical>),
 {
     let texture_id = (TypeId::of::<<R as Renderer>::TextureId>(), renderer.id());
     let mut result = Ok(());
+    let scale = scale.into();
     with_surface_tree_upward(
         surface,
-        (location, (0, 0).into()),
-        |_surface, states, (location, surface_offset)| {
+        location,
+        |_surface, states, location| {
             let mut location = *location;
-            let mut surface_offset = *surface_offset;
             if let Some(data) = states.data_map.get::<RefCell<SurfaceState>>() {
                 let mut data_ref = data.borrow_mut();
                 let data = &mut *data_ref;
@@ -275,9 +278,8 @@ where
                 if data.textures.contains_key(&texture_id) {
                     // if yes, also process the children
                     let surface_view = data.surface_view.unwrap();
-                    location += surface_view.offset;
-                    surface_offset += surface_view.offset;
-                    TraversalAction::DoChildren((location, surface_offset))
+                    location += surface_view.offset.to_f64().to_physical(scale).to_i32_round();
+                    TraversalAction::DoChildren(location)
                 } else {
                     // we are not displayed, so our children are neither
                     TraversalAction::SkipChildren
@@ -307,8 +309,8 @@ pub fn draw_surface_tree<R, S>(
     frame: &mut <R as Renderer>::Frame,
     surface: &WlSurface,
     scale: S,
-    location: Point<i32, Logical>,
-    damage: &[Rectangle<i32, Logical>],
+    location: Point<i32, Physical>,
+    damage: &[Rectangle<i32, Physical>],
     log: &slog::Logger,
 ) -> Result<(), <R as Renderer>::Error>
 where
@@ -319,14 +321,15 @@ where
     let texture_id = (TypeId::of::<<R as Renderer>::TextureId>(), renderer.id());
     let mut result = Ok(());
     let scale = scale.into();
+    let initial_location = location;
     let _ = import_surface_tree_and(
         renderer,
         surface,
+        scale,
         log,
         location,
-        |_surface, states, (location, surface_offset)| {
+        |_surface, states, location| {
             let mut location = *location;
-            let mut surface_offset = *surface_offset;
             if let Some(data) = states.data_map.get::<RefCell<SurfaceState>>() {
                 let mut data = data.borrow_mut();
                 let surface_view = data.surface_view;
@@ -339,8 +342,14 @@ where
                     .and_then(|x| x.downcast_mut::<<R as Renderer>::TextureId>())
                 {
                     let surface_view = surface_view.unwrap();
-                    surface_offset += surface_view.offset;
-                    location += surface_view.offset;
+                    location += surface_view.offset.to_f64().to_physical(scale).to_i32_round();
+
+                    let surface_size = ((surface_view.dst.to_point() + surface_view.offset)
+                        .to_f64()
+                        .to_physical(scale)
+                        .to_i32_round()
+                        - surface_view.offset.to_f64().to_physical(scale).to_i32_round())
+                    .to_size();
 
                     let damage = damage
                         .iter()
@@ -348,15 +357,19 @@ where
                         // first move the damage by the surface offset in logical space
                         .map(|mut geo| {
                             // make the damage relative to the surface
-                            geo.loc -= surface_offset;
+                            geo.loc += initial_location;
                             geo
                         })
                         // then clamp to surface size again in logical space
                         .flat_map(|geo| {
-                            geo.intersection(Rectangle::from_loc_and_size((0, 0), surface_view.dst))
+                            geo.intersection(Rectangle::from_loc_and_size(location, surface_size))
                         })
                         // lastly transform it into physical space
-                        .map(|geo| geo.to_f64().to_physical(scale))
+                        .map(|mut geo| {
+                            geo.loc -= location;
+                            geo
+                        })
+                        .map(|geo| geo.to_f64())
                         .collect::<Vec<_>>();
 
                     if damage.is_empty() {
@@ -371,9 +384,7 @@ where
                             .to_logical(buffer_scale, buffer_transform)
                             .to_f64(),
                     );
-                    let dst = Rectangle::from_loc_and_size(location, surface_view.dst)
-                        .to_f64()
-                        .to_physical(scale);
+                    let dst = Rectangle::from_loc_and_size(location, surface_size).to_f64();
                     if let Err(err) =
                         frame.render_texture_from_to(texture, src, dst, &damage, buffer_transform, 1.0)
                     {

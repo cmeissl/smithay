@@ -1,18 +1,18 @@
 use crate::{
     backend::renderer::Renderer,
     desktop::{
-        layer::LayerSurface,
+        layer::{layer_state, LayerSurface},
         popup::{PopupKind, PopupManager},
         space::Space,
-        utils::{bbox_from_surface_tree, damage_from_surface_tree},
+        utils::{damage_from_surface_tree, output_geometry_from_surface_tree},
         window::Window,
     },
-    utils::{Logical, Point, Rectangle, Scale},
+    utils::{Logical, Physical, Point, Rectangle, Scale},
     wayland::{output::Output, shell::wlr_layer::Layer},
 };
 use std::any::TypeId;
 
-use super::RenderZindex;
+use super::{window::window_loc, RenderZindex};
 
 #[derive(Debug)]
 pub struct RenderPopup {
@@ -23,7 +23,7 @@ pub struct RenderPopup {
 
 impl Window {
     pub(super) fn popup_elements(&self, space_id: usize) -> impl Iterator<Item = RenderPopup> {
-        let loc = self.elem_location(space_id) + self.geometry().loc;
+        let loc = window_loc(self, &space_id) - self.geometry().loc + self.geometry().loc;
         self.toplevel()
             .get_surface()
             .map(move |surface| {
@@ -46,8 +46,8 @@ impl Window {
 }
 
 impl LayerSurface {
-    pub(super) fn popup_elements(&self, space_id: usize) -> impl Iterator<Item = RenderPopup> + '_ {
-        let loc = self.elem_geometry(space_id).loc;
+    pub(super) fn popup_elements(&self, _space_id: usize) -> impl Iterator<Item = RenderPopup> + '_ {
+        let loc = layer_state(self).location;
         self.get_surface()
             .map(move |surface| {
                 PopupManager::popups_for_surface(surface)
@@ -90,20 +90,30 @@ impl RenderPopup {
         TypeId::of::<RenderPopup>()
     }
 
-    pub(super) fn elem_geometry(&self, _space_id: usize) -> Rectangle<i32, Logical> {
-        if let Some(surface) = self.popup.get_surface() {
-            bbox_from_surface_tree(surface, self.location)
-        } else {
-            Rectangle::from_loc_and_size((0, 0), (0, 0))
-        }
+    pub(super) fn elem_geometry(
+        &self,
+        _space_id: usize,
+        scale: impl Into<Scale<f64>>,
+    ) -> Rectangle<i32, Physical> {
+        let scale = scale.into();
+        let surface = match self.popup.get_surface() {
+            Some(surface) => surface,
+            None => return Rectangle::default(),
+        };
+        output_geometry_from_surface_tree(
+            surface,
+            self.location.to_f64().to_physical(scale).to_i32_round(),
+            scale,
+        )
     }
 
     pub(super) fn elem_accumulated_damage(
         &self,
+        scale: impl Into<Scale<f64>>,
         for_values: Option<(&Space, &Output)>,
-    ) -> Vec<Rectangle<i32, Logical>> {
+    ) -> Vec<Rectangle<i32, Physical>> {
         if let Some(surface) = self.popup.get_surface() {
-            damage_from_surface_tree(surface, (0, 0), for_values)
+            damage_from_surface_tree(surface, (0, 0), scale, for_values)
         } else {
             Vec::new()
         }
@@ -116,8 +126,8 @@ impl RenderPopup {
         _renderer: &mut R,
         _frame: &mut <R as Renderer>::Frame,
         _scale: S,
-        _location: Point<i32, Logical>,
-        _damage: &[Rectangle<i32, Logical>],
+        _location: Point<i32, Physical>,
+        _damage: &[Rectangle<i32, Physical>],
         _log: &slog::Logger,
     ) -> Result<(), <R as Renderer>::Error>
     where

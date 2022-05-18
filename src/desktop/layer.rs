@@ -1,7 +1,7 @@
 use crate::{
     backend::renderer::{utils::draw_surface_tree, ImportAll, Renderer},
     desktop::{utils::*, PopupManager, Space},
-    utils::{user_data::UserDataMap, Logical, Point, Rectangle, Scale},
+    utils::{user_data::UserDataMap, Logical, Physical, Point, Rectangle, Scale},
     wayland::{
         compositor::{with_states, with_surface_tree_downward, TraversalAction},
         output::{Inner as OutputInner, Output},
@@ -502,6 +502,35 @@ impl LayerSurface {
         bounding_box
     }
 
+    /// TODO: Docs
+    pub fn output_geometry(
+        &self,
+        location: impl Into<Point<i32, Physical>>,
+        scale: impl Into<Scale<f64>>,
+    ) -> Rectangle<i32, Physical> {
+        let location = location.into();
+        let scale = scale.into();
+        let surface = match self.0.surface.get_surface() {
+            Some(surface) => surface,
+            None => return Rectangle::default(),
+        };
+        let mut geo = output_geometry_from_surface_tree(surface, location, scale);
+        for (popup, p_location) in PopupManager::popups_for_surface(surface)
+            .ok()
+            .into_iter()
+            .flatten()
+        {
+            if let Some(surface) = popup.get_surface() {
+                geo = geo.merge(output_geometry_from_surface_tree(
+                    surface,
+                    location + p_location.to_f64().to_physical(scale).to_i32_round(),
+                    scale,
+                ));
+            }
+        }
+        geo
+    }
+
     /// Finds the topmost surface under this point if any and returns it together with the location of this
     /// surface.
     ///
@@ -539,24 +568,22 @@ impl LayerSurface {
     /// Subsequent calls will return an empty vector until the buffer is updated again.
     pub(super) fn accumulated_damage(
         &self,
+        scale: impl Into<Scale<f64>>,
         for_values: Option<(&Space, &Output)>,
-    ) -> Vec<Rectangle<i32, Logical>> {
+    ) -> Vec<Rectangle<i32, Physical>> {
+        let scale = scale.into();
         let mut damage = Vec::new();
         if let Some(surface) = self.get_surface() {
-            damage.extend(
-                damage_from_surface_tree(surface, (0, 0), for_values)
-                    .into_iter()
-                    .flat_map(|rect| rect.intersection(self.bbox())),
-            );
+            damage.extend(damage_from_surface_tree(surface, (0, 0), scale, for_values));
             for (popup, location) in PopupManager::popups_for_surface(surface)
                 .ok()
                 .into_iter()
                 .flatten()
             {
                 if let Some(surface) = popup.get_surface() {
-                    let bbox = bbox_from_surface_tree(surface, location);
-                    let popup_damage = damage_from_surface_tree(surface, location, for_values);
-                    damage.extend(popup_damage.into_iter().flat_map(|rect| rect.intersection(bbox)));
+                    let location = location.to_f64().to_physical(scale).to_i32_round();
+                    let popup_damage = damage_from_surface_tree(surface, location, scale, for_values);
+                    damage.extend(popup_damage);
                 }
             }
         }
@@ -601,14 +628,14 @@ pub fn draw_layer_surface<R, P, S>(
     layer: &LayerSurface,
     scale: S,
     location: P,
-    damage: &[Rectangle<i32, Logical>],
+    damage: &[Rectangle<i32, Physical>],
     log: &slog::Logger,
 ) -> Result<(), <R as Renderer>::Error>
 where
     R: Renderer + ImportAll,
     <R as Renderer>::TextureId: 'static,
     S: Into<Scale<f64>>,
-    P: Into<Point<i32, Logical>>,
+    P: Into<Point<i32, Physical>>,
 {
     let location = location.into();
     let scale = scale.into();
@@ -619,6 +646,7 @@ where
             .into_iter()
             .flatten()
         {
+            let p_location = p_location.to_f64().to_physical(scale).to_i32_round();
             if let Some(surface) = popup.get_surface() {
                 let damage = damage
                     .iter()

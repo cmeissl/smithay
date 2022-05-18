@@ -7,7 +7,7 @@ use smithay::{
     backend::renderer::{Frame, ImportAll, Renderer, Texture},
     desktop::space::{RenderElement, SpaceOutputTuple, SurfaceTree},
     reexports::wayland_server::protocol::wl_surface,
-    utils::{Logical, Point, Rectangle, Scale, Size, Transform},
+    utils::{Logical, Physical, Point, Rectangle, Scale, Size, Transform},
     wayland::{
         compositor::{get_role, with_states},
         seat::CursorImageAttributes,
@@ -103,12 +103,23 @@ where
         0
     }
 
-    fn geometry(&self) -> Rectangle<i32, Logical> {
-        Rectangle::from_loc_and_size(self.position, self.size)
+    fn geometry(&self, scale: impl Into<Scale<f64>>) -> Rectangle<i32, Physical> {
+        let scale = scale.into();
+        Rectangle::from_loc_and_size(
+            self.position.to_f64().to_physical(scale).to_i32_round(),
+            self.size.to_f64().to_physical(scale).to_i32_round(),
+        )
     }
 
-    fn accumulated_damage(&self, _: Option<SpaceOutputTuple<'_, '_>>) -> Vec<Rectangle<i32, Logical>> {
-        vec![Rectangle::from_loc_and_size((0, 0), self.size)]
+    fn accumulated_damage(
+        &self,
+        scale: impl Into<Scale<f64>>,
+        _: Option<SpaceOutputTuple<'_, '_>>,
+    ) -> Vec<Rectangle<i32, Physical>> {
+        vec![Rectangle::from_loc_and_size((0, 0), self.size)
+            .to_f64()
+            .to_physical(scale)
+            .to_i32_up()]
     }
 
     fn draw(
@@ -116,21 +127,18 @@ where
         _renderer: &mut R,
         frame: &mut <R as Renderer>::Frame,
         scale: impl Into<Scale<f64>>,
-        location: Point<i32, Logical>,
-        damage: &[Rectangle<i32, Logical>],
+        location: Point<i32, Physical>,
+        damage: &[Rectangle<i32, Physical>],
         _log: &Logger,
     ) -> Result<(), <R as Renderer>::Error> {
         let scale = scale.into();
         frame.render_texture_at(
             &self.texture,
-            location.to_f64().to_physical(scale).to_i32_round(),
+            location.to_f64(),
             1,
             scale,
             Transform::Normal,
-            &*damage
-                .iter()
-                .map(|rect| rect.to_f64().to_physical(scale).to_i32_round())
-                .collect::<Vec<_>>(),
+            &*damage.iter().map(|rect| rect.to_f64()).collect::<Vec<_>>(),
             1.0,
         )?;
         Ok(())

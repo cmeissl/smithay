@@ -4,7 +4,7 @@ use smithay::{
         draw_window,
         space::{RenderElement, RenderError, Space},
     },
-    utils::{Logical, Rectangle},
+    utils::{Physical, Rectangle},
     wayland::output::Output,
 };
 
@@ -17,7 +17,7 @@ pub fn render_output<R, E>(
     age: usize,
     elements: &[E],
     log: &slog::Logger,
-) -> Result<Option<Vec<Rectangle<i32, Logical>>>, RenderError<R>>
+) -> Result<Option<Vec<Rectangle<i32, Physical>>>, RenderError<R>>
 where
     R: Renderer + ImportAll,
     R::TextureId: 'static,
@@ -36,7 +36,7 @@ where
             .unwrap_or_else(|| Rectangle::from_loc_and_size((0, 0), (0, 0)));
         renderer
             .render(mode.size, transform, |renderer, frame| {
-                let mut damage = window.accumulated_damage(None);
+                let mut damage = window.accumulated_damage(scale, None);
                 frame.clear(
                     CLEAR_COLOR,
                     &[Rectangle::from_loc_and_size((0, 0), mode.size).to_f64()],
@@ -47,16 +47,13 @@ where
                     &window,
                     scale,
                     (0, 0),
-                    &[Rectangle::from_loc_and_size(
-                        (0, 0),
-                        mode.size.to_f64().to_logical(scale).to_i32_round(),
-                    )],
+                    &[Rectangle::from_loc_and_size((0, 0), mode.size)],
                     log,
                 )?;
                 for elem in elements {
-                    let geo = elem.geometry();
-                    let location = geo.loc - output_geo.loc;
-                    let elem_damage = elem.accumulated_damage(None);
+                    let geo = elem.geometry(scale);
+                    let location = geo.loc - output_geo.loc.to_f64().to_physical(scale).to_i32_round();
+                    let elem_damage = elem.accumulated_damage(scale, None);
                     elem.draw(
                         renderer,
                         frame,

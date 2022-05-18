@@ -1,7 +1,7 @@
 use crate::{
     backend::renderer::{ImportAll, Renderer},
     desktop::space::{RenderElement, SpaceElement},
-    utils::{Logical, Point, Rectangle},
+    utils::{Logical, Physical, Point, Rectangle},
     wayland::output::Output,
 };
 use indexmap::IndexMap;
@@ -38,8 +38,8 @@ pub struct OutputState {
     pub location: Point<i32, Logical>,
 
     // damage and last_state are in space coordinate space
-    pub old_damage: VecDeque<Vec<Rectangle<i32, Logical>>>,
-    pub last_state: IndexMap<ToplevelId, Rectangle<i32, Logical>>,
+    pub old_damage: VecDeque<Vec<Rectangle<i32, Physical>>>,
+    pub last_state: IndexMap<ToplevelId, Rectangle<i32, Physical>>,
 
     // surfaces for tracking enter and leave events
     pub surfaces: Vec<WlSurface>,

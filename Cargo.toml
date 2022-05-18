@@ -85,3 +85,6 @@ test_all_features = ["default", "use_system_lib", "wayland-server/dlopen"]
 [[example]]
 name = "raw_drm"
 required-features = ["backend_drm"]
+
+[patch.crates-io]
+winit = { git = 'https://github.com/rust-windowing/winit.git', rev = "1c68be0631e9614e2c9c5ff0d3f032b60487a30f" }
