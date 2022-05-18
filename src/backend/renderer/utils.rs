@@ -157,8 +157,8 @@ pub fn on_commit_buffer_handler(surface: &WlSurface) {
 #[derive(Debug, Default, PartialEq, Clone, Copy)]
 pub(crate) struct SurfaceView {
     pub src: Rectangle<f64, Logical>,
-    pub dst: Size<f64, Logical>,
-    pub offset: Point<f64, Logical>,
+    pub dst: Size<i32, Logical>,
+    pub offset: Point<i32, Logical>,
 }
 
 impl SurfaceView {
@@ -181,7 +181,10 @@ impl SurfaceView {
     }
 
     fn scale(&self) -> Scale<f64> {
-        Scale::from((self.dst.w / self.src.size.w, self.dst.h / self.src.size.h))
+        Scale::from((
+            self.dst.w as f64 / self.src.size.w,
+            self.dst.h as f64 / self.src.size.h,
+        ))
     }
 
     fn from_states(states: &SurfaceData, surface_size: Size<i32, Logical>) -> SurfaceView {
@@ -190,13 +193,9 @@ impl SurfaceView {
         let src = viewport
             .src
             .unwrap_or_else(|| Rectangle::from_loc_and_size((0.0, 0.0), surface_size.to_f64()));
-        let dst = viewport.size().unwrap_or(surface_size).to_f64();
+        let dst = viewport.size().unwrap_or(surface_size);
         let offset = if states.role == Some("subsurface") {
-            states
-                .cached_state
-                .current::<SubsurfaceCachedState>()
-                .location
-                .to_f64()
+            states.cached_state.current::<SubsurfaceCachedState>().location
         } else {
             Default::default()
         };
@@ -230,23 +229,19 @@ fn import_surface_tree_and<F, R>(
     renderer: &mut R,
     surface: &WlSurface,
     log: &slog::Logger,
-    src: Option<Rectangle<f64, Logical>>,
+    src: Option<Rectangle<i32, Logical>>,
     processor: F,
 ) -> Result<(), <R as Renderer>::Error>
 where
     R: Renderer + ImportAll,
     <R as Renderer>::TextureId: 'static,
-    F: FnMut(&WlSurface, &SurfaceData, &(Point<f64, Logical>, Option<Point<f64, Logical>>)),
+    F: FnMut(&WlSurface, &SurfaceData, &(Point<i32, Logical>, Option<Point<i32, Logical>>)),
 {
-    let src = src.unwrap_or_else(|| {
-        Rectangle::from_loc_and_size((f64::MIN, f64::MIN), (f64::INFINITY, f64::INFINITY))
-    });
-
     let texture_id = (TypeId::of::<<R as Renderer>::TextureId>(), renderer.id());
     let mut result = Ok(());
     with_surface_tree_upward(
         surface,
-        ((0., 0.).into(), None),
+        ((0, 0).into(), None),
         |_surface, states, (surface_offset, parent_crop)| {
             let mut surface_offset = *surface_offset;
             if let Some(data) = states.data_map.get::<RefCell<SurfaceState>>() {
@@ -277,14 +272,18 @@ where
                     // if yes, also process the children
                     let surface_view = data.surface_view.unwrap();
 
-                    // Move the src rect relative to the surface
-                    let mut src = src;
-                    src.loc -= surface_offset + surface_view.offset;
-
                     // We use the surface view dst size here as this is the size
                     // the surface would be rendered on screen without applying the
                     // crop but it already includes wp_viewporter
-                    let surface_rect = Rectangle::from_loc_and_size((0., 0.), surface_view.dst);
+                    let surface_rect = Rectangle::from_loc_and_size((0, 0), surface_view.dst);
+
+                    let src = src
+                        .map(|mut src| {
+                            // Move the src rect relative to the surface
+                            src.loc -= surface_offset + surface_view.offset;
+                            src
+                        })
+                        .unwrap_or(surface_rect);
 
                     if let Some(intersection) = surface_rect.intersection(src) {
                         let mut offset = surface_view.offset;
@@ -334,7 +333,7 @@ pub fn draw_surface_tree<R>(
     output_scale: f64,
     location: Point<i32, Logical>,
     damage: &[Rectangle<i32, Logical>],
-    src: Option<Rectangle<f64, Logical>>,
+    src: Option<Rectangle<i32, Logical>>,
     surface_scale: impl Into<Scale<f64>>,
     log: &slog::Logger,
 ) -> Result<(), <R as Renderer>::Error>
@@ -345,9 +344,6 @@ where
     let surface_scale = surface_scale.into();
     let initial_location = location;
     let location = location.to_f64().to_physical(output_scale);
-    let src = src.unwrap_or_else(|| {
-        Rectangle::from_loc_and_size((f64::MIN, f64::MIN), (f64::INFINITY, f64::INFINITY))
-    });
 
     let texture_id = (TypeId::of::<<R as Renderer>::TextureId>(), renderer.id());
     let mut result = Ok(());
@@ -355,7 +351,7 @@ where
         renderer,
         surface,
         log,
-        Some(src),
+        src,
         |_surface, states, (surface_offset, parent_crop)| {
             let mut surface_offset = *surface_offset;
             if let Some(data) = states.data_map.get::<RefCell<SurfaceState>>() {
@@ -370,20 +366,27 @@ where
                 {
                     let surface_view = surface_view.unwrap();
 
-                    // Move the src rect relative to the surface
-                    let mut src = src;
-                    src.loc -= surface_offset + surface_view.offset;
-
                     // We use the surface view dst size here as this is the size
                     // the surface would be rendered on screen without applying the
                     // crop but it already includes wp_viewporter
-                    let surface_rect = Rectangle::from_loc_and_size((0., 0.), surface_view.dst);
+                    let surface_rect = Rectangle::from_loc_and_size((0, 0), surface_view.dst);
+
+                    let src = src
+                        .map(|mut src| {
+                            // Move the src rect relative to the surface
+                            src.loc -= surface_offset + surface_view.offset;
+                            src
+                        })
+                        .unwrap_or(surface_rect);
+
                     let intersection = match surface_rect.intersection(src) {
                         Some(rect) => rect,
                         None => {
                             return;
                         }
                     };
+
+                    debug_assert_eq!(surface_rect, intersection);
 
                     let mut offset = surface_view.offset;
 
@@ -394,25 +397,82 @@ where
 
                     surface_offset += offset;
 
+                    // let damage = damage
+                    //     .iter()
+                    //     .cloned()
+                    //     // first move the damage by the surface offset in logical space
+                    //     .map(|geo| {
+                    //         let mut geo = geo.to_f64();
+                    //         geo.loc += initial_location.to_f64();
+                    //         geo.to_physical(output_scale).to_i32_up()
+                    //     })
+                    //     // then clamp to surface size again in logical space
+                    //     .flat_map(|geo| {
+                    //         geo.intersection(Rectangle::from_loc_and_size(
+                    //             (initial_location
+                    //                 + surface_offset.to_f64().upscale(surface_scale).to_i32_round())
+                    //             .to_f64()
+                    //             .to_physical(output_scale),
+                    //             intersection
+                    //                 .size
+                    //                 .to_f64()
+                    //                 .upscale(surface_scale)
+                    //                 .to_i32_round()
+                    //                 .to_physical(output_scale),
+                    //         ))
+                    //     })
+                    //     // lastly transform it into physical space
+                    //     .map(|mut geo| {
+                    //         geo.loc -= (initial_location
+                    //             + surface_offset.to_f64().upscale(surface_scale).to_i32_round())
+                    //         .to_f64()
+                    //         .to_physical(output_scale);
+                    //         geo
+                    //     })
+                    //     .collect::<Vec<_>>();
                     let damage = damage
                         .iter()
                         .cloned()
+                        // .map(|mut geo| {
+                        //     geo.loc -= surface_offset.to_f64().upscale(surface_scale).to_i32_round();
+                        //     geo
+                        // })
+                        // .flat_map(|geo| {
+                        //     geo.intersection(Rectangle::from_loc_and_size(
+                        //         (0, 0),
+                        //         intersection.size.to_f64().upscale(surface_scale).to_i32_round(),
+                        //     ))
+                        // })
+                        // .map(|geo| geo.to_f64().to_physical(output_scale).to_i32_up())
                         // first move the damage by the surface offset in logical space
                         .map(|geo| {
                             let mut geo = geo.to_f64();
                             geo.loc += initial_location.to_f64();
                             geo.to_physical(output_scale).to_i32_up()
                         })
-                        // then clamp to surface size again in logical space
+                        //then clamp to surface size again in logical space
                         .flat_map(|geo| {
                             geo.intersection(Rectangle::from_loc_and_size(
-                                (initial_location.to_f64() + surface_offset).to_physical(output_scale),
-                                intersection.size.upscale(surface_scale).to_physical(output_scale),
+                                (initial_location
+                                    + surface_offset.to_f64().upscale(surface_scale).to_i32_round())
+                                .to_f64()
+                                .to_physical(output_scale),
+                                intersection
+                                    .size
+                                    .to_f64()
+                                    .upscale(surface_scale)
+                                    .to_i32_round()
+                                    .to_physical(output_scale),
                             ))
                         })
                         // lastly transform it into physical space
-                        .map(|mut geo| { 
-                            geo.loc -= (initial_location.to_f64() + surface_offset).to_physical(output_scale);
+                        .map(|mut geo| {
+                            geo.loc -= location
+                                + surface_offset
+                                    .to_f64()
+                                    .upscale(surface_scale)
+                                    .to_i32_round()
+                                    .to_physical(output_scale);
                             geo
                         })
                         .collect::<Vec<_>>();
@@ -428,14 +488,31 @@ where
                     let src = src.to_buffer(
                         buffer_scale as f64,
                         attributes.buffer_transform.into(),
-                        &surface_view.dst,
+                        &surface_view.dst.to_f64(),
                     );
 
-                    let mut dst = Rectangle::from_loc_and_size(surface_offset, intersection.size)
+                    let pos = location
+                        + surface_offset
+                            .to_f64()
+                            .upscale(surface_scale)
+                            .to_i32_round::<f64>()
+                            .to_physical(output_scale);
+                    // let pos = (initial_location
+                    //     + surface_offset.to_f64().upscale(surface_scale).to_i32_round())
+                    // .to_f64()
+                    // .to_physical(output_scale);
+                    let size = intersection
+                        .size
+                        .to_f64()
                         .upscale(surface_scale)
-                        .to_i32_up()
+                        .to_i32_round()
                         .to_physical(output_scale);
-                    dst.loc += location;
+                    let dst = Rectangle::from_loc_and_size(pos, size);
+                    // let mut dst = Rectangle::from_loc_and_size(surface_offset, intersection.size)
+                    //     .upscale(surface_scale)
+                    //     .to_i32_up()
+                    //     .to_physical(output_scale);
+                    // dst.loc += location;
 
                     if src.is_empty() || dst.is_empty() {
                         return;

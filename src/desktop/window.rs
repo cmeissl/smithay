@@ -95,14 +95,14 @@ impl Kind {
 pub struct WindowTransform {
     /// Defines an optional source [`Rectangle`] that can
     /// be used for cropping a window
-    pub src: Option<Rectangle<f64, Logical>>,
+    pub src: Option<Rectangle<i32, Logical>>,
 
     /// Defines an optional scale which will be used for
     /// the window
     pub scale: Scale<f64>,
 
     /// Defines an optional offset for the window
-    pub offset: Point<f64, Logical>,
+    pub offset: Point<i32, Logical>,
 }
 
 impl Default for WindowTransform {
@@ -200,20 +200,20 @@ impl Window {
             return Rectangle::default();
         }
 
-        let mut geometry = self.real_geometry().to_f64();
+        let mut geometry = self.real_geometry();
         let transform = self.0.transform.get();
         if let Some(src) = transform.src {
             geometry = geometry.intersection(src).unwrap_or_default();
             let pos_rect = Rectangle::from_extemities(
-                (0.0, 0.0),
-                (f64::max(geometry.loc.x, 0.0), f64::max(geometry.loc.y, 0.0)),
+                (0, 0),
+                (i32::max(geometry.loc.x, 0), i32::max(geometry.loc.y, 0)),
             );
             geometry.loc -= src.loc.constrain(pos_rect);
         }
 
-        geometry = geometry.upscale(transform.scale);
+        let mut geometry = geometry.to_f64().upscale(transform.scale).to_i32_round();
         geometry.loc -= transform.offset;
-        geometry.to_i32_up()
+        geometry
     }
 
     /// Returns a bounding box over this window and its children.
@@ -222,15 +222,14 @@ impl Window {
             return Rectangle::default();
         }
 
-        let mut bbox = self.0.bbox.get().to_f64();
+        let mut bbox = self.0.bbox.get();
         let transform = self.0.transform.get();
         if let Some(src) = transform.src {
             bbox = bbox.intersection(src).unwrap_or_default();
-            bbox.loc = Point::from((f64::min(bbox.loc.x, 0.0), f64::min(bbox.loc.y, 0.0)));
+            bbox.loc = Point::from((i32::min(bbox.loc.x, 0), i32::min(bbox.loc.y, 0)));
         }
 
-        bbox = bbox.upscale(transform.scale);
-        bbox.to_i32_up()
+        bbox.to_f64().upscale(transform.scale).to_i32_round()
     }
 
     /// Returns a bounding box over this window and children including popups.
@@ -342,15 +341,17 @@ impl Window {
                 let left_top_crop: Point<f64, Logical> =
                     Point::from((-f64::min(rect.loc.x, 0.0), -f64::min(rect.loc.y, 0.0)))
                         .upscale(window_scale);
+                dbg!(left_top_crop);
                 let size = intersection.size.upscale(window_scale);
-                let src = Rectangle::from_loc_and_size(geometry.loc.to_f64() + left_top_crop, size);
+                let src =
+                    Rectangle::from_loc_and_size(geometry.loc.to_f64() + left_top_crop, size).to_i32_round();
 
-                let scale = Scale::from((intersection.size.w / src.size.w, intersection.size.h / src.size.h));
+                let scale = Scale::from((intersection.size.w / size.w, intersection.size.h / size.h));
 
                 WindowTransform {
                     src: Some(src),
                     scale,
-                    offset: intersection.loc,
+                    offset: intersection.loc.to_i32_round(),
                 }
             } else {
                 WindowTransform::default()
@@ -360,23 +361,25 @@ impl Window {
         };
         self.0.transform.set(transform);
 
-        let src = transform.src.unwrap_or_else(|| {
-            Rectangle::from_loc_and_size((f64::MIN, f64::MIN), (f64::INFINITY, f64::INFINITY))
-        });
-
         with_surface_tree_downward(
             surface,
-            (Point::from((0.0, 0.0)), None),
+            (Point::from((0, 0)), None),
             |_, states, (surface_offset, parent_crop)| {
                 let mut surface_offset = *surface_offset;
                 let data = states.data_map.get::<RefCell<SurfaceState>>();
 
                 if let Some(surface_view) = data.and_then(|d| d.borrow().surface_view) {
-                    // Move the src rect relative to the surface
-                    let mut src = src;
-                    src.loc -= surface_offset + surface_view.offset;
+                    let surface_rect = Rectangle::from_loc_and_size((0, 0), surface_view.dst);
 
-                    let surface_rect = Rectangle::from_loc_and_size((0., 0.), surface_view.dst);
+                    let src = transform
+                        .src
+                        .map(|mut src| {
+                            // Move the src rect relative to the surface
+                            src.loc -= surface_offset + surface_view.offset;
+                            src
+                        })
+                        .unwrap_or(surface_rect);
+
                     if let Some(intersection) = surface_rect.intersection(src) {
                         let mut offset = surface_view.offset;
 
@@ -396,7 +399,7 @@ impl Window {
                             .unwrap()
                             .borrow_mut();
                         input_transform.scale = (1.0 / transform.scale.x, 1.0 / transform.scale.y).into();
-                        input_transform.offset = intersection.loc;
+                        input_transform.offset = intersection.loc.to_f64();
                         TraversalAction::DoChildren((surface_offset, Some(intersection.loc)))
                     } else {
                         TraversalAction::SkipChildren

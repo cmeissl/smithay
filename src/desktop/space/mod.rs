@@ -566,7 +566,7 @@ impl Space {
                 // First clear all damaged regions
                 slog::trace!(self.logger, "Clearing at {:#?}", damage);
                 frame.clear(
-                    clear_color,
+                    [1.0, 0.0, 0.0, 1.0],
                     &damage
                         .iter()
                         // Map from global space to output space

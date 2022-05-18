@@ -341,7 +341,7 @@ pub fn init_shell<BackendData: Backend + 'static>(
                     // of a xdg_surface has to be sent during the commit if
                     // the surface is not already configured
                     let window = Window::new(SurfaceKind::Xdg(surface));
-                    window.set_constrain((640, 480), fit_constrain);
+                    //window.set_constrain((640, 480), fit_constrain);
                     place_new_window(&mut *state.space.borrow_mut(), &window, true);
                 }
 

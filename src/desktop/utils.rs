@@ -27,9 +27,10 @@ impl SurfaceState {
         };
 
         let rect = Rectangle {
-            loc: (0.0, 0.0).into(),
+            loc: (0, 0).into(),
             size,
-        };
+        }
+        .to_f64();
 
         // The input region is always within the surface itself, so if the surface itself doesn't contain the
         // point we can return false.
@@ -56,7 +57,7 @@ impl SurfaceState {
 pub fn bbox_from_surface_tree<P>(
     surface: &wl_surface::WlSurface,
     location: P,
-    src: Option<Rectangle<f64, Logical>>,
+    src: Option<Rectangle<i32, Logical>>,
     scale: impl Into<Scale<f64>>,
 ) -> Rectangle<i32, Logical>
 where
@@ -64,26 +65,27 @@ where
 {
     let location = location.into();
     let scale = scale.into();
-    let src = src.unwrap_or_else(|| {
-        Rectangle::from_loc_and_size((f64::MIN, f64::MIN), (f64::INFINITY, f64::INFINITY))
-    });
     let mut bounding_box = Rectangle::from_loc_and_size(location, (0, 0));
     with_surface_tree_downward(
         surface,
-        (Point::from((0.0, 0.0)), None),
+        (Point::from((0, 0)), None),
         |_, states, (surface_offset, parent_crop)| {
             let mut surface_offset = *surface_offset;
             let data = states.data_map.get::<RefCell<SurfaceState>>();
 
             if let Some(surface_view) = data.and_then(|d| d.borrow().surface_view) {
-                // Move the src rect relative to the surface
-                let mut src = src;
-                src.loc -= surface_offset + surface_view.offset;
-
                 // We use the surface view dst size here as this is the size
                 // the surface would be rendered on screen without applying the
                 // crop but it already includes wp_viewporter
-                let surface_rect = Rectangle::from_loc_and_size((0., 0.), surface_view.dst);
+                let surface_rect = Rectangle::from_loc_and_size((0, 0), surface_view.dst);
+
+                let src = src
+                    .map(|mut src| {
+                        // Move the src rect relative to the surface
+                        src.loc -= surface_offset + surface_view.offset;
+                        src
+                    })
+                    .unwrap_or(surface_rect);
 
                 if let Some(intersection) = surface_rect.intersection(src) {
                     let mut offset = surface_view.offset;
@@ -95,10 +97,9 @@ where
 
                     surface_offset += offset;
 
-                    let mut rect = Rectangle::from_loc_and_size(surface_offset, intersection.size)
-                        .upscale(scale)
-                        .to_i32_up();
-                    rect.loc += location;
+                    let pos = location + surface_offset.to_f64().upscale(scale).to_i32_round();
+                    let size = intersection.size.to_f64().upscale(scale).to_i32_round();
+                    let rect = Rectangle::from_loc_and_size(pos, size);
 
                     bounding_box = bounding_box.merge(rect);
 
@@ -129,7 +130,7 @@ pub fn damage_from_surface_tree<P>(
     surface: &wl_surface::WlSurface,
     location: P,
     key: Option<(&Space, &Output)>,
-    src: Option<Rectangle<f64, Logical>>,
+    src: Option<Rectangle<i32, Logical>>,
     scale: impl Into<Scale<f64>>,
 ) -> Vec<Rectangle<i32, Logical>>
 where
@@ -139,28 +140,29 @@ where
 
     let location = location.into();
     let scale = scale.into();
-    let src = src.unwrap_or_else(|| {
-        Rectangle::from_loc_and_size((f64::MIN, f64::MIN), (f64::INFINITY, f64::INFINITY))
-    });
 
     let mut damage = Vec::new();
     let key = key.map(|x| SpaceOutputTuple::from(x).owned_hash());
     with_surface_tree_upward(
         surface,
-        (Point::from((0.0, 0.0)), None),
+        (Point::from((0, 0)), None),
         |_surface, states, (surface_offset, parent_crop)| {
             let mut surface_offset = *surface_offset;
             let data = states.data_map.get::<RefCell<SurfaceState>>();
 
             if let Some(surface_view) = data.and_then(|d| d.borrow().surface_view) {
-                // Move the src rect relative to the surface
-                let mut src = src;
-                src.loc -= surface_offset + surface_view.offset;
-
                 // We use the surface view dst size here as this is the size
                 // the surface would be rendered on screen without applying the
                 // crop but it already includes wp_viewporter
-                let surface_rect = Rectangle::from_loc_and_size((0., 0.), surface_view.dst);
+                let surface_rect = Rectangle::from_loc_and_size((0, 0), surface_view.dst);
+
+                let src = src
+                    .map(|mut src| {
+                        // Move the src rect relative to the surface
+                        src.loc -= surface_offset + surface_view.offset;
+                        src
+                    })
+                    .unwrap_or(surface_rect);
 
                 if let Some(intersection) = surface_rect.intersection(src) {
                     let mut offset = surface_view.offset;
@@ -192,14 +194,18 @@ where
                     .unwrap_or(true)
                 {
                     if let Some(surface_view) = data.surface_view {
-                        // Move the src rect relative to the surface
-                        let mut src = src;
-                        src.loc -= surface_offset + surface_view.offset;
-
                         // We use the surface view dst size here as this is the size
                         // the surface would be rendered on screen without applying the
                         // crop but it already includes wp_viewporter
-                        let surface_rect = Rectangle::from_loc_and_size((0., 0.), surface_view.dst);
+                        let surface_rect = Rectangle::from_loc_and_size((0, 0), surface_view.dst);
+
+                        let src = src
+                            .map(|mut src| {
+                                // Move the src rect relative to the surface
+                                src.loc -= surface_offset + surface_view.offset;
+                                src
+                            })
+                            .unwrap_or(surface_rect);
 
                         let intersection = match surface_rect.intersection(src) {
                             Some(rect) => rect,
@@ -231,29 +237,48 @@ where
 
                         damage.extend(new_damage.into_iter().flat_map(|rect| {
                             // First bring the buffer damage to logical space
-                            rect.to_f64().to_logical(
-                                data.buffer_scale as f64,
-                                data.buffer_transform,
-                                &data.buffer_dimensions.unwrap().to_f64(),
-                            )
-                            // Then crop by the src ignoring any damage outside of it
-                            .intersection(surface_view.src)
-                            .map(|rect| {
-                                // Now move the rect into global space (for example viewporter could apply a scale)
-                                surface_view.rect_to_global(rect)
-                            })
-                            .and_then(|rect| {
-                                // Then apply the compositor driven crop and scale
-                                rect.intersection(src).map(|mut rect| {
-                                    rect.loc -= intersection.loc;
-                                    rect.loc += surface_offset;
-                                    rect.upscale(scale).to_i32_up()
+                            rect.to_f64()
+                                .to_logical(
+                                    data.buffer_scale as f64,
+                                    data.buffer_transform,
+                                    &data.buffer_dimensions.unwrap().to_f64(),
+                                )
+                                // Then crop by the src ignoring any damage outside of it
+                                .intersection(surface_view.src)
+                                .map(|rect| {
+                                    // Now move the rect into global space (for example viewporter could apply a scale)
+                                    surface_view.rect_to_global(rect).to_i32_up()
                                 })
-                            })
-                            .map(|mut rect| {
-                                rect.loc += location;
-                                rect
-                            })
+                                .and_then(|rect| {
+                                    // Then apply the compositor driven crop and scale
+                                    rect.intersection(src).map(|rect| {
+                                        // let pos = (rect.loc - intersection.loc)
+                                        //     .to_f64()
+                                        //     .upscale(scale)
+                                        //     .to_i32_floor()
+                                        //     + location
+                                        //     + surface_offset.to_f64().upscale(scale).to_i32_floor();
+                                        // let tmp = (rect.size.to_point() + rect.loc)
+                                        //     .to_f64()
+                                        //     .upscale(scale)
+                                        //     .to_i32_ceil::<i32>()
+                                        //     - rect.loc.to_f64().upscale(scale).to_i32_floor();
+                                        // let size = rect.size.to_f64().upscale(scale).to_i32_ceil::<i32>();
+                                        // dbg!(tmp);
+                                        // dbg!(size);
+                                        // dbg!(Rectangle::from_loc_and_size(pos, tmp.to_size()))
+                                        // rect.loc -= intersection.loc;
+                                        // rect.loc += surface_offset;
+                                        // rect.to_f64().upscale(scale).to_i32_up()
+                                        let mut rect = rect;
+                                        rect.loc += location + surface_offset;
+                                        rect
+                                    })
+                                })
+                            // .map(|mut rect| {
+                            //     rect.loc += location;
+                            //     rect
+                            // })
                         }));
 
                         if let Some(key) = key {
@@ -280,36 +305,37 @@ pub fn under_from_surface_tree<P>(
     point: Point<f64, Logical>,
     location: P,
     surface_type: WindowSurfaceType,
-    src: Option<Rectangle<f64, Logical>>,
+    src: Option<Rectangle<i32, Logical>>,
     scale: impl Into<Scale<f64>>,
 ) -> Option<(wl_surface::WlSurface, Point<i32, Logical>)>
 where
     P: Into<Point<i32, Logical>>,
 {
     let scale = scale.into();
-    let src = src.unwrap_or_else(|| {
-        Rectangle::from_loc_and_size((f64::MIN, f64::MIN), (f64::INFINITY, f64::INFINITY))
-    });
-    let location = location.into().to_f64();
-    let surface_tree_local_point = (point - location).downscale(scale);
+    let location = location.into();
+    let surface_tree_local_point = (point - location.to_f64()).downscale(scale);
 
     let found = RefCell::new(None);
     with_surface_tree_downward(
         surface,
-        (Point::from((0.0, 0.0)), None),
+        (Point::from((0, 0)), None),
         |surface, states, (surface_offset, parent_crop)| {
             let mut surface_offset = *surface_offset;
             let data = states.data_map.get::<RefCell<SurfaceState>>();
 
             if let Some(surface_view) = data.and_then(|d| d.borrow().surface_view) {
-                // Move the src rect relative to the surface
-                let mut src = src;
-                src.loc -= surface_offset + surface_view.offset;
-
                 // We use the surface view dst size here as this is the size
                 // the surface would be rendered on screen without applying the
                 // crop but it already includes wp_viewporter
-                let surface_rect = Rectangle::from_loc_and_size((0., 0.), surface_view.dst);
+                let surface_rect = Rectangle::from_loc_and_size((0, 0), surface_view.dst);
+
+                let src = src
+                    .map(|mut src| {
+                        // Move the src rect relative to the surface
+                        src.loc -= surface_offset + surface_view.offset;
+                        src
+                    })
+                    .unwrap_or(surface_rect);
 
                 if let Some(intersection) = surface_rect.intersection(src) {
                     let mut offset = surface_view.offset;
@@ -323,14 +349,14 @@ where
 
                     if states.role == Some("subsurface") || surface_type.contains(WindowSurfaceType::TOPLEVEL)
                     {
-                        let rect = Rectangle::from_loc_and_size(surface_offset, intersection.size);
+                        let rect = Rectangle::from_loc_and_size(surface_offset, intersection.size).to_f64();
                         // Test if the point is within our cropped surface rectangle
                         if rect.contains(surface_tree_local_point) {
                             // Move the point local to the surface and
                             // add the surface crop so that the point is
                             // correctly offset for the input region test
-                            let surface_local_point =
-                                (surface_tree_local_point - surface_offset) + intersection.loc;
+                            let surface_local_point = (surface_tree_local_point - surface_offset.to_f64())
+                                + intersection.loc.to_f64();
                             let data = states.data_map.get::<RefCell<SurfaceState>>();
                             let contains_the_point = data
                                 .map(|data| {
@@ -341,7 +367,7 @@ where
                             if contains_the_point {
                                 *found.borrow_mut() = Some((
                                     surface.clone(),
-                                    (location + surface_offset.upscale(scale).to_i32_floor()).to_i32_round(),
+                                    location + surface_offset.to_f64().upscale(scale).to_i32_round(),
                                 ));
                             }
                         }
@@ -401,18 +427,15 @@ pub(crate) fn output_update(
     surface_list: &mut Vec<wl_surface::WlSurface>,
     surface: &wl_surface::WlSurface,
     location: Point<i32, Logical>,
-    src: Option<Rectangle<f64, Logical>>,
+    src: Option<Rectangle<i32, Logical>>,
     scale: impl Into<Scale<f64>>,
     logger: &slog::Logger,
 ) {
     let scale = scale.into();
-    let src = src.unwrap_or_else(|| {
-        Rectangle::from_loc_and_size((f64::MIN, f64::MIN), (f64::INFINITY, f64::INFINITY))
-    });
 
     with_surface_tree_upward(
         surface,
-        (Point::from((0.0, 0.0)), None, false),
+        (Point::from((0, 0)), None, false),
         |_surface, states, (surface_offset, parent_crop, parent_unmapped)| {
             let mut surface_offset = *surface_offset;
             let data = states.data_map.get::<RefCell<SurfaceState>>();
@@ -420,14 +443,18 @@ pub(crate) fn output_update(
             if *parent_unmapped {
                 TraversalAction::DoChildren((surface_offset, None, true))
             } else if let Some(surface_view) = data.and_then(|d| d.borrow().surface_view) {
-                // Move the src rect relative to the surface
-                let mut src = src;
-                src.loc -= surface_offset + surface_view.offset;
-
                 // We use the surface view dst size here as this is the size
                 // the surface would be rendered on screen without applying the
                 // crop but it already includes wp_viewporter
-                let surface_rect = Rectangle::from_loc_and_size((0., 0.), surface_view.dst);
+                let surface_rect = Rectangle::from_loc_and_size((0, 0), surface_view.dst);
+
+                let src = src
+                    .map(|mut src| {
+                        // Move the src rect relative to the surface
+                        src.loc -= surface_offset + surface_view.offset;
+                        src
+                    })
+                    .unwrap_or(surface_rect);
 
                 if let Some(intersection) = surface_rect.intersection(src) {
                     let mut offset = surface_view.offset;
@@ -459,14 +486,19 @@ pub(crate) fn output_update(
             let data = states.data_map.get::<RefCell<SurfaceState>>();
 
             if let Some(surface_view) = data.and_then(|d| d.borrow().surface_view) {
-                // Move the src rect relative to the surface
-                let mut src = src;
-                src.loc -= surface_offset + surface_view.offset;
-
                 // We use the surface view dst size here as this is the size
                 // the surface would be rendered on screen without applying the
                 // crop but it already includes wp_viewporter
-                let surface_rect = Rectangle::from_loc_and_size((0., 0.), surface_view.dst);
+                let surface_rect = Rectangle::from_loc_and_size((0, 0), surface_view.dst);
+
+                let src = src
+                    .map(|mut src| {
+                        // Move the src rect relative to the surface
+                        src.loc -= surface_offset + surface_view.offset;
+                        src
+                    })
+                    .unwrap_or(surface_rect);
+
                 let intersection = surface_rect.intersection(src).unwrap_or_default();
                 let mut offset = surface_view.offset;
 
@@ -477,10 +509,10 @@ pub(crate) fn output_update(
 
                 surface_offset += offset;
 
-                let mut rect = Rectangle::from_loc_and_size(surface_offset, intersection.size)
-                    .upscale(scale)
-                    .to_i32_up();
-                rect.loc += location;
+                let pos = (location + surface_offset).to_f64().upscale(scale).to_i32_round();
+                let size = intersection.size.to_f64().upscale(scale).to_i32_round();
+
+                let rect = Rectangle::from_loc_and_size(pos, size);
 
                 if output_geometry.overlaps(rect) {
                     // We found a matching output, check if we already sent enter
