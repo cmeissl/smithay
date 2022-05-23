@@ -7,7 +7,7 @@ use crate::{
         utils::{bbox_from_surface_tree, damage_from_surface_tree},
         window::Window,
     },
-    utils::{Logical, Point, Rectangle},
+    utils::{Logical, Point, Rectangle, Scale},
     wayland::{output::Output, shell::wlr_layer::Layer},
 };
 use std::any::TypeId;
@@ -110,18 +110,19 @@ impl RenderPopup {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(super) fn elem_draw<R>(
+    pub(super) fn elem_draw<R, S>(
         &self,
         _space_id: usize,
         _renderer: &mut R,
         _frame: &mut <R as Renderer>::Frame,
-        _scale: f64,
+        _scale: S,
         _location: Point<i32, Logical>,
         _damage: &[Rectangle<i32, Logical>],
         _log: &slog::Logger,
     ) -> Result<(), <R as Renderer>::Error>
     where
         R: Renderer,
+        S: Into<Scale<f64>>,
     {
         // popups are special, we track them, but they render with their parents
         Ok(())
