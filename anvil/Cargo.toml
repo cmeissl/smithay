@@ -20,6 +20,9 @@ slog-async = "2.2"
 slog-stdlog = "4.1.0"
 slog-scope = "4.4.0"
 xkbcommon = "0.4.0"
+gstreamer = { version = "0.18", optional = true }
+gstreamer-app = { version = "0.18", optional = true }
+gstreamer-video = { version = "0.18", optional = true }
 
 [dependencies.smithay]
 path = ".."
@@ -36,10 +39,11 @@ features = [ "composite" ]
 gl_generator = "0.14"
 
 [features]
-default = [ "udev", "logind", "x11", "egl", "winit", "xwayland" ]
+default = [ "udev", "logind", "x11", "egl", "winit", "xwayland", "gst" ]
 egl = [ "smithay/use_system_lib", "smithay/backend_egl" ]
 winit = [ "smithay/backend_winit" ]
 udev = [ "smithay/backend_libinput", "smithay/backend_udev", "smithay/backend_drm", "smithay/backend_gbm", "smithay/backend_egl", "smithay/backend_session", "input", "image", "smithay/renderer_gl", "smithay/renderer_multi", "xcursor" ]
+gst = ["gstreamer", "gstreamer-app", "gstreamer-video"]
 logind = [ "smithay/backend_session_logind" ]
 elogind = ["logind", "smithay/backend_session_elogind" ]
 libseat = ["smithay/backend_session_libseat" ]

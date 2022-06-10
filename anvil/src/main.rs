@@ -7,6 +7,8 @@ static POSSIBLE_BACKENDS: &[&str] = &[
     "--tty-udev : Run anvil as a tty udev client (requires root if without logind).",
     #[cfg(feature = "x11")]
     "--x11 : Run anvil as an X11 client.",
+    #[cfg(feature = "gst")]
+    "--gst : Run headless with gst",
 ];
 
 fn main() {
@@ -39,6 +41,14 @@ fn main() {
         Some("--x11") => {
             slog::info!(log, "Starting anvil with x11 backend");
             anvil::x11::run_x11(log);
+        }
+        #[cfg(feature = "gst")]
+        Some("--gst") => {
+            slog::info!(
+                log,
+                "Starting anvil with gst backend, open in VLC with udp://@127.0.0.1:5000"
+            );
+            anvil::gst::run_gst(log);
         }
         Some(other) => {
             crit!(log, "Unknown backend: {}", other);

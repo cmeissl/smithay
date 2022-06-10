@@ -24,5 +24,7 @@ pub mod winit;
 pub mod x11;
 #[cfg(feature = "xwayland")]
 pub mod xwayland;
+#[cfg(feature = "gst")]
+pub mod gst;
 
 pub use state::AnvilState;
