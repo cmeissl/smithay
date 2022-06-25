@@ -581,6 +581,9 @@ impl EGLDisplay {
             }
         }
 
+        // out.push(ffi::egl::IMAGE_PRESERVED_KHR as i32);
+        // out.push(ffi::egl::TRUE as i32);
+
         out.push(ffi::egl::NONE as i32);
 
         unsafe {
@@ -735,7 +738,7 @@ fn get_dmabuf_formats(
                     modifier: Modifier::from(modifier),
                 };
                 texture_formats.insert(format);
-                if external_only == 0 {
+                if external_only == ffi::egl::FALSE {
                     render_formats.insert(format);
                 }
             }
