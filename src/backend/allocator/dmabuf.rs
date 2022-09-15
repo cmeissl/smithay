@@ -12,8 +12,9 @@
 
 use super::{Buffer, Format, Fourcc, Modifier};
 use crate::utils::{Buffer as BufferCoords, Size};
+use io_lifetimes::{AsFd, BorrowedFd, OwnedFd};
 use std::hash::{Hash, Hasher};
-use std::os::unix::io::{IntoRawFd, RawFd};
+use std::os::unix::io::{FromRawFd, IntoRawFd, RawFd};
 use std::sync::{Arc, Weak};
 
 /// Maximum amount of planes this implementation supports
@@ -35,7 +36,7 @@ pub(crate) struct DmabufInternal {
 
 #[derive(Debug)]
 pub(crate) struct Plane {
-    pub fd: Option<RawFd>,
+    pub fd: Option<OwnedFd>,
     /// The plane index
     pub plane_idx: u32,
     /// Offset from the start of the Fd
@@ -48,15 +49,7 @@ pub(crate) struct Plane {
 
 impl IntoRawFd for Plane {
     fn into_raw_fd(mut self) -> RawFd {
-        self.fd.take().unwrap()
-    }
-}
-
-impl Drop for Plane {
-    fn drop(&mut self) {
-        if let Some(fd) = self.fd.take() {
-            let _ = nix::unistd::close(fd);
-        }
+        self.fd.take().unwrap().into_raw_fd()
     }
 }
 
@@ -134,7 +127,7 @@ impl DmabufBuilder {
             return false;
         }
         self.internal.planes.push(Plane {
-            fd: Some(fd),
+            fd: Some(unsafe { OwnedFd::from_raw_fd(fd) }),
             plane_idx: idx,
             offset,
             stride,
@@ -196,8 +189,8 @@ impl Dmabuf {
     }
 
     /// Returns raw handles of the planes of this buffer
-    pub fn handles(&self) -> impl Iterator<Item = RawFd> + '_ {
-        self.0.planes.iter().map(|p| *p.fd.as_ref().unwrap())
+    pub fn handles(&self) -> impl Iterator<Item = BorrowedFd<'_>> + '_ {
+        self.0.planes.iter().map(|p| p.fd.as_ref().unwrap().as_fd())
     }
 
     /// Returns offsets for the planes of this buffer

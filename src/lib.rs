@@ -50,6 +50,8 @@
 //! features of Smithay.
 
 #[doc(hidden)]
+pub extern crate io_lifetimes;
+#[doc(hidden)]
 pub extern crate nix;
 
 pub mod backend;
