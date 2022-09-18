@@ -16,6 +16,7 @@
 //! - [`Swapchain`] to help with buffer management for framebuffers
 
 pub mod dmabuf;
+pub mod dmabuf_heap;
 #[cfg(feature = "backend_drm")]
 pub mod dumb;
 pub mod format;
