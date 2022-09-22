@@ -326,7 +326,7 @@ impl<A: AsRawFd + 'static> LegacyDrmSurface<A> {
         })
     }
 
-    pub fn test_buffer(&self, fb: framebuffer::Handle, mode: &Mode) -> Result<bool, Error> {
+    pub fn test_buffer(&self, fb: framebuffer::Handle) -> Result<bool, Error> {
         if !self.active.load(Ordering::SeqCst) {
             return Err(Error::DeviceInactive);
         }
@@ -345,7 +345,7 @@ impl<A: AsRawFd + 'static> LegacyDrmSurface<A> {
                     .iter()
                     .copied()
                     .collect::<Vec<connector::Handle>>(),
-                Some(*mode),
+                None,
             )
             .is_ok())
     }
