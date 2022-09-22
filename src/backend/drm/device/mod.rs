@@ -14,7 +14,7 @@ use nix::sys::stat::fstat;
 
 pub(super) mod atomic;
 pub(super) mod legacy;
-use crate::utils::{Physical, Size};
+use crate::utils::{Buffer, Size};
 
 use super::surface::{atomic::AtomicDrmSurface, legacy::LegacyDrmSurface, DrmSurface, DrmSurfaceInternal};
 use super::{error::Error, planes, Planes};
@@ -32,7 +32,7 @@ pub struct DrmDevice<A: AsRawFd + 'static> {
     pub(super) links: RefCell<Vec<crate::utils::signaling::SignalToken>>,
     has_universal_planes: bool,
     has_monotonic_timestamps: bool,
-    cursor_size: Size<u32, Physical>,
+    cursor_size: Size<u32, Buffer>,
     resources: ResourceHandles,
     pub(super) logger: ::slog::Logger,
     token: Option<Token>,
@@ -228,7 +228,7 @@ impl<A: AsRawFd + 'static> DrmDevice<A> {
     /// Note: In case of universal planes this is the
     /// maximum size of a buffer that can be used on
     /// the cursor plane.
-    pub fn cursor_size(&self) -> Size<u32, Physical> {
+    pub fn cursor_size(&self) -> Size<u32, Buffer> {
         self.cursor_size
     }
 

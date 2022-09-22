@@ -72,6 +72,7 @@
 pub(crate) mod device;
 pub(self) mod error;
 pub mod node;
+pub mod renderer;
 
 #[cfg(feature = "backend_session")]
 pub(self) mod session;
@@ -84,7 +85,7 @@ pub use node::{CreateDrmNodeError, DrmNode, NodeType};
 pub use surface::gbm::{Error as GbmBufferedSurfaceError, GbmBufferedSurface};
 pub use surface::DrmSurface;
 
-use drm::control::{crtc, plane, Device as ControlDevice, PlaneType};
+use drm::control::{crtc, plane, property, Device as ControlDevice, PlaneType};
 
 /// A set of planes as supported by a crtc
 #[derive(Debug)]
@@ -169,4 +170,29 @@ fn plane_type(dev: &impl ControlDevice, plane: plane::Handle) -> Result<PlaneTyp
         }
     }
     unreachable!()
+}
+
+fn plane_zpos(dev: &impl ControlDevice, plane: plane::Handle) -> Result<Option<i32>, DrmError> {
+    let props = dev.get_properties(plane).map_err(|source| DrmError::Access {
+        errmsg: "Failed to get properties of plane",
+        dev: dev.dev_path(),
+        source,
+    })?;
+    let (ids, vals) = props.as_props_and_values();
+    for (&id, &val) in ids.iter().zip(vals.iter()) {
+        let info = dev.get_property(id).map_err(|source| DrmError::Access {
+            errmsg: "Failed to get property info",
+            dev: dev.dev_path(),
+            source,
+        })?;
+        if info.name().to_str().map(|x| x == "zpos").unwrap_or(false) {
+            let plane_zpos = match info.value_type().convert_value(val) {
+                property::Value::UnsignedRange(u) => Some(u as i32),
+                property::Value::SignedRange(i) => Some(i as i32),
+                _ => None,
+            };
+            return Ok(plane_zpos);
+        }
+    }
+    Ok(None)
 }

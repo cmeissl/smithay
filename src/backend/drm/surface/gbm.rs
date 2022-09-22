@@ -13,8 +13,11 @@ use crate::backend::allocator::{
 };
 use crate::backend::drm::{device::DevPath, surface::DrmSurfaceInternal, DrmError, DrmSurface};
 use crate::backend::SwapBuffersError;
+use crate::utils::{Point, Rectangle, Transform};
 
 use slog::{debug, error, o, trace, warn};
+
+use super::PlaneConfig;
 
 /// Simplified abstraction of a swapchain for gbm-buffers displayed on a [`DrmSurface`].
 #[derive(Debug)]
@@ -187,11 +190,30 @@ where
             Ok(dmabuf) => dmabuf,
             Err(err) => return Err((swapchain.allocator, err.into())),
         };
-        let handle = fb.fb;
         buffer.userdata().insert_if_missing(|| dmabuf);
         buffer.userdata().insert_if_missing(|| fb);
 
-        match drm.test_buffer(handle, &mode, true) {
+        let handle = buffer.userdata().get::<FbHandle<D>>().unwrap();
+
+        match drm.test_state(
+            &[(
+                drm.plane(),
+                Some(super::PlaneConfig {
+                    src: Rectangle::from_loc_and_size(
+                        Point::default(),
+                        (mode.size().0 as i32, mode.size().1 as i32),
+                    )
+                    .to_f64(),
+                    dst: Rectangle::from_loc_and_size(
+                        Point::default(),
+                        (mode.size().0 as i32, mode.size().1 as i32),
+                    ),
+                    transform: Transform::Normal,
+                    buffer: handle,
+                }),
+            )],
+            true,
+        ) {
             Ok(_) => {
                 debug!(logger, "Choosen format: {:?}", format);
                 Ok((buffer, swapchain))
@@ -267,12 +289,21 @@ where
     fn submit(&mut self) -> Result<(), Error<A::Error>> {
         // yes it does not look like it, but both of these lines should be safe in all cases.
         let slot = self.queued_fb.take().unwrap();
-        let fb = slot.userdata().get::<FbHandle<D>>().unwrap().fb;
+        let handle = slot.userdata().get::<FbHandle<D>>().unwrap();
+        let mode = self.drm.pending_mode();
+
+        let plane_config = PlaneConfig {
+            src: Rectangle::from_loc_and_size(Point::default(), (mode.size().0 as i32, mode.size().1 as i32))
+                .to_f64(),
+            dst: Rectangle::from_loc_and_size(Point::default(), (mode.size().0 as i32, mode.size().1 as i32)),
+            transform: Transform::Normal,
+            buffer: handle,
+        };
 
         let flip = if self.drm.commit_pending() {
-            self.drm.commit([(fb, self.drm.plane())].iter(), true)
+            self.drm.commit(&[(self.plane(), Some(plane_config))], true)
         } else {
-            self.drm.page_flip([(fb, self.drm.plane())].iter(), true)
+            self.drm.page_flip(&[(self.plane(), Some(plane_config))], true)
         };
         if flip.is_ok() {
             self.swapchain.submitted(&slot);
@@ -369,6 +400,12 @@ where
 struct FbHandle<D: AsRawFd + 'static> {
     drm: Arc<DrmSurface<D>>,
     fb: framebuffer::Handle,
+}
+
+impl<A: AsRawFd + 'static> AsRef<framebuffer::Handle> for FbHandle<A> {
+    fn as_ref(&self) -> &framebuffer::Handle {
+        &self.fb
+    }
 }
 
 impl<A: AsRawFd + 'static> Drop for FbHandle<A> {
