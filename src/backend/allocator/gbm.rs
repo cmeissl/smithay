@@ -76,39 +76,40 @@ impl<T> AsDmabuf for GbmBuffer<T> {
     fn export(&self) -> Result<Dmabuf, GbmConvertError> {
         let planes = self.plane_count()? as i32;
 
-        //TODO switch to gbm_bo_get_plane_fd when it lands
-        let mut iter = (0i32..planes).map(|i| self.handle_for_plane(i));
-        let first = iter.next().expect("Encountered a buffer with zero planes");
-        // check that all handles are the same
-        let handle = iter.try_fold(first, |first, next| {
-            if let (Ok(next), Ok(first)) = (next, first) {
-                if unsafe { next.u64_ == first.u64_ } {
-                    return Some(Ok(first));
-                }
-            }
-            None
-        });
-        if handle.is_none() {
-            // GBM is lacking a function to get a FD for a given plane. Instead,
-            // check all planes have the same handle. We can't use
-            // drmPrimeHandleToFD because that messes up handle ref'counting in
-            // the user-space driver.
-            return Err(GbmConvertError::UnsupportedBuffer); //TODO
-        }
+        // //TODO switch to gbm_bo_get_plane_fd when it lands
+        // let mut iter = (0i32..planes).map(|i| self.handle_for_plane(i));
+        // let first = iter.next().expect("Encountered a buffer with zero planes");
+        // // check that all handles are the same
+        // let handle = iter.try_fold(first, |first, next| {
+        //     if let (Ok(next), Ok(first)) = (next, first) {
+        //         if unsafe { next.u64_ == first.u64_ } {
+        //             return Some(Ok(first));
+        //         }
+        //     }
+        //     None
+        // });
+        // if handle.is_none() {
+        //     // GBM is lacking a function to get a FD for a given plane. Instead,
+        //     // check all planes have the same handle. We can't use
+        //     // drmPrimeHandleToFD because that messes up handle ref'counting in
+        //     // the user-space driver.
+        //     return Err(GbmConvertError::UnsupportedBuffer); //TODO
+        // }
 
-        // Make sure to only call fd once as each call will create
-        // a new file descriptor which has to be closed
-        let fd = self.fd()?;
+        // // Make sure to only call fd once as each call will create
+        // // a new file descriptor which has to be closed
+        // let fd = self.fd()?;
 
-        // gbm_bo_get_fd returns -1 if an error occurs
-        if fd == -1 {
-            return Err(GbmConvertError::InvalidFD);
-        }
+        // // gbm_bo_get_fd returns -1 if an error occurs
+        // if fd == -1 {
+        //     return Err(GbmConvertError::InvalidFD);
+        // }
 
         let mut builder = Dmabuf::builder_from_buffer(self, DmabufFlags::empty());
+
         for idx in 0..planes {
             builder.add_plane(
-                fd,
+                self.fd_for_plane(idx)?,
                 idx as u32,
                 self.offset(idx)?,
                 self.stride_for_plane(idx)?,
