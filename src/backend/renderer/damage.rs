@@ -546,6 +546,8 @@ impl DamageTrackedRenderer {
                 )?;
             }
 
+            frame.draw_solid([0.5f32, 0f32, 0f32, 0.3f32], &*new_damage)?;
+
             Result::<(), R::Error>::Ok(())
         });
 
