@@ -49,6 +49,9 @@
 //! #     fn clear(&mut self, _: [f32; 4], _: &[Rectangle<i32, Physical>]) -> Result<(), Self::Error> {
 //! #         unimplemented!()
 //! #     }
+//! #     fn draw_solid(&mut self, _: [f32; 4], _: &[Rectangle<i32, Physical>]) -> Result<(), Self::Error> {
+//! #         unimplemented!()
+//! #     }
 //! #     fn render_texture_from_to(
 //! #         &mut self,
 //! #         _: &Self::TextureId,

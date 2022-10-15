@@ -1212,6 +1212,13 @@ where
             .map_err(Error::Render)
     }
 
+    fn draw_solid(&mut self, color: [f32; 4], at: &[Rectangle<i32, Physical>]) -> Result<(), Self::Error> {
+        self.damage.extend(at);
+        unsafe { &mut *self.frame }
+            .draw_solid(color, at)
+            .map_err(Error::Render)
+    }
+
     fn render_texture_from_to(
         &mut self,
         texture: &Self::TextureId,

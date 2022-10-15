@@ -1847,11 +1847,12 @@ const fn triangle_verts() -> [ffi::types::GLfloat; 12 * MAX_RECTS_PER_DRAW] {
     verts
 }
 
-impl Frame for Gles2Frame {
-    type Error = Gles2Error;
-    type TextureId = Gles2Texture;
-
-    fn clear(&mut self, color: [f32; 4], at: &[Rectangle<i32, Physical>]) -> Result<(), Self::Error> {
+impl Gles2Frame {
+    fn draw_solid_internal(
+        &mut self,
+        color: [f32; 4],
+        at: &[Rectangle<i32, Physical>],
+    ) -> Result<(), Gles2Error> {
         if at.is_empty() {
             return Ok(());
         }
@@ -1872,7 +1873,6 @@ impl Frame for Gles2Frame {
             .collect::<Vec<_>>();
 
         unsafe {
-            self.gl.Disable(ffi::BLEND);
             self.gl.UseProgram(self.solid_program.program);
             self.gl.Uniform4f(
                 self.solid_program.uniform_color,
@@ -1965,11 +1965,41 @@ impl Frame for Gles2Frame {
                 .DisableVertexAttribArray(self.solid_program.attrib_vert as u32);
             self.gl
                 .DisableVertexAttribArray(self.solid_program.attrib_position as u32);
+        }
+
+        Ok(())
+    }
+}
+
+impl Frame for Gles2Frame {
+    type Error = Gles2Error;
+    type TextureId = Gles2Texture;
+
+    fn clear(&mut self, color: [f32; 4], at: &[Rectangle<i32, Physical>]) -> Result<(), Self::Error> {
+        if at.is_empty() {
+            return Ok(());
+        }
+
+        unsafe {
+            self.gl.Disable(ffi::BLEND);
+        }
+
+        self.draw_solid_internal(color, at)?;
+
+        unsafe {
             self.gl.Enable(ffi::BLEND);
             self.gl.BlendFunc(ffi::ONE, ffi::ONE_MINUS_SRC_ALPHA);
         }
 
         Ok(())
+    }
+
+    fn draw_solid(&mut self, color: [f32; 4], at: &[Rectangle<i32, Physical>]) -> Result<(), Self::Error> {
+        if at.is_empty() {
+            return Ok(());
+        }
+
+        self.draw_solid_internal(color, at)
     }
 
     fn render_texture_from_to(
