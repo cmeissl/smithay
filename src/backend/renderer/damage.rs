@@ -162,7 +162,10 @@
 //! }
 //! ```
 
-use std::collections::VecDeque;
+use std::{
+    collections::VecDeque,
+    time::{Duration, Instant},
+};
 
 use indexmap::IndexMap;
 
@@ -238,6 +241,8 @@ impl TryInto<(Size<i32, Physical>, Scale<f64>, Transform)> for DamageTrackedRend
 pub struct DamageTrackedRenderer {
     mode: DamageTrackedRendererMode,
     last_state: RendererState,
+
+    tracer: DamageTracer,
 }
 
 /// Errors thrown by [`DamageTrackedRenderer::render_output`]
@@ -274,6 +279,7 @@ impl DamageTrackedRenderer {
                 transform,
             },
             last_state: Default::default(),
+            tracer: Default::default(),
         }
     }
 
@@ -286,6 +292,7 @@ impl DamageTrackedRenderer {
         Self {
             mode: DamageTrackedRendererMode::Auto(output.clone()),
             last_state: Default::default(),
+            tracer: Default::default(),
         }
     }
 
@@ -309,6 +316,7 @@ impl DamageTrackedRenderer {
         <R as Renderer>::TextureId: Texture,
     {
         let log = crate::slog_or_fallback(log);
+        let now = Instant::now();
 
         let (output_size, output_scale, output_transform) = self.mode.clone().try_into()?;
         let output_geo = Rectangle::from_loc_and_size((0, 0), output_size);
@@ -440,6 +448,9 @@ impl DamageTrackedRenderer {
             damage = vec![output_geo];
         }
 
+        // Update the damage tracer state
+        damage.extend(self.tracer.update(now));
+
         // That is all completely new damage, which we need to store for subsequent renders
         let new_damage = damage.clone();
 
@@ -484,6 +495,8 @@ impl DamageTrackedRenderer {
             slog::trace!(log, "nothing damaged, exiting early");
             return Ok(None);
         }
+
+        self.tracer.push_damage(now, new_damage.clone());
 
         slog::trace!(log, "damage to be rendered: {:#?}", &damage);
 
@@ -546,7 +559,7 @@ impl DamageTrackedRenderer {
                 )?;
             }
 
-            frame.draw_solid([0.5f32, 0f32, 0f32, 0.3f32], &*new_damage)?;
+            self.tracer.draw(now, frame);
 
             Result::<(), R::Error>::Ok(())
         });
@@ -578,5 +591,86 @@ impl DamageTrackedRenderer {
         self.last_state.old_damage.push_front(new_damage.clone());
 
         Ok(Some(new_damage))
+    }
+}
+
+/// A simple damage tracer that can visualize damage over time
+#[derive(Debug)]
+pub struct DamageTracer {
+    damage: Vec<(Instant, Vec<Rectangle<i32, Physical>>)>,
+    duration: Duration,
+}
+
+impl Default for DamageTracer {
+    fn default() -> Self {
+        DamageTracer::new(Duration::from_secs(1))
+    }
+}
+
+impl DamageTracer {
+    /// Initialize a new damage tracer
+    pub fn new(duration: Duration) -> Self {
+        DamageTracer {
+            damage: Vec::new(),
+            duration,
+        }
+    }
+
+    /// Append new damage to trace
+    ///
+    /// Returns the damage that has been removed and thus should be cleared/redrawn
+    pub fn update(&mut self, timepoint: Instant) -> Vec<Rectangle<i32, Physical>> {
+        let damage = self
+            .damage
+            .iter()
+            .cloned()
+            .flat_map(|(_, d)| d)
+            .collect::<Vec<_>>();
+        self.cleanup(timepoint);
+        damage
+    }
+
+    /// Push the new damage
+    pub fn push_damage(&mut self, timepoint: Instant, damage: Vec<Rectangle<i32, Physical>>) {
+        self.damage.push((timepoint, damage));
+    }
+
+    /// Draw this damage tracer
+    pub fn draw<F: Frame>(&self, timepoint: Instant, frame: &mut F) {
+        for (tp, damage) in &self.damage {
+            frame.draw_solid([0.5f32, 0f32, 0f32, 0.3f32], &*damage);
+        }
+    }
+
+    fn cleanup(&mut self, timepoint: Instant) -> Vec<Rectangle<i32, Physical>> {
+        let mut removed = Vec::new();
+
+        let mut i = 0;
+        while i < self.damage.len() {
+            if timepoint.duration_since(self.damage[i].0) > self.duration {
+                let (_, damage) = self.damage.remove(i);
+                removed.extend(damage);
+            } else {
+                i += 1;
+            }
+        }
+
+        removed
+    }
+}
+
+/// A RGBA color
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Rgba([f32; 4]);
+
+impl From<(f32, f32, f32, f32)> for Rgba {
+    fn from((r, g, b, a): (f32, f32, f32, f32)) -> Self {
+        Rgba([r, g, b, a])
+    }
+}
+
+impl From<[f32; 4]> for Rgba {
+    fn from(color: [f32; 4]) -> Self {
+        Rgba(color)
     }
 }
