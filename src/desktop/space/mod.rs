@@ -29,6 +29,8 @@ mod output;
 mod wayland {
     mod layer;
     mod window;
+
+    pub use window::surface_output_overlap;
 }
 
 pub use self::element::*;
@@ -667,4 +669,40 @@ where
     render_elements.extend(space_render_elements.into_iter().map(OutputRenderElements::Space));
 
     damage_tracked_renderer.render_output(renderer, age, &*render_elements, clear_color, log)
+}
+
+/// Find the output with the most overlap for a [`WlSurface`] of a window out of a set of outputs
+///
+/// Note: This function requires the use of [`SpaceElement::output_enter`]/[`SpaceElement::output_leave`],
+/// if you use [`Space`] they will get call automatically called for mapped windows.
+///
+/// Returns `None` if no output with an overlap could be found
+pub fn window_surface_output_most_overlap<'a>(
+    surface: &WlSurface,
+    outputs: impl IntoIterator<Item = &'a Output>,
+) -> Option<&'a Output> {
+    outputs.into_iter().fold(None, |current, next| {
+        let current_overlap = current.and_then(|o| wayland::surface_output_overlap(surface, o));
+        let next_overlap = wayland::surface_output_overlap(surface, next);
+
+        match (current_overlap, next_overlap) {
+            // If both outputs have no overlap with the surface
+            // we definitely have not found a better match
+            (None, None) => None,
+            // If our current best match has no overlap, but the next one
+            // we can directly select it as the better match
+            (None, Some(_)) => Some(next),
+            // If next has no overlap there is no need to further
+            // check for a better match
+            (Some(_), None) => current,
+            // So, both outputs have an overlap, use the one with the bigger overlap
+            (Some(current_overlap), Some(next_overlap)) => {
+                if next_overlap.size > current_overlap.size {
+                    Some(next)
+                } else {
+                    current
+                }
+            }
+        }
+    })
 }

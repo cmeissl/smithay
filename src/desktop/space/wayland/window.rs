@@ -16,15 +16,15 @@ use wayland_server::{protocol::wl_surface::WlSurface, Resource, Weak as WlWeak};
 
 use std::{
     cell::{RefCell, RefMut},
-    collections::{HashMap, HashSet},
+    collections::HashMap,
 };
 
-type OutputSurfacesUserdata = RefCell<HashSet<WlWeak<WlSurface>>>;
-fn output_surfaces(o: &Output) -> RefMut<'_, HashSet<WlWeak<WlSurface>>> {
+type OutputSurfacesUserdata = RefCell<HashMap<WlWeak<WlSurface>, Rectangle<i32, Logical>>>;
+fn output_surfaces(o: &Output) -> RefMut<'_, HashMap<WlWeak<WlSurface>, Rectangle<i32, Logical>>> {
     let userdata = o.user_data();
     userdata.insert_if_missing(OutputSurfacesUserdata::default);
     let mut surfaces = userdata.get::<OutputSurfacesUserdata>().unwrap().borrow_mut();
-    surfaces.retain(|s| s.upgrade().is_ok());
+    surfaces.retain(|o, _| o.upgrade().is_ok());
     surfaces
 }
 
@@ -70,9 +70,11 @@ fn output_update(
             if let Some(surface_view) = data.and_then(|d| d.borrow().surface_view) {
                 location += surface_view.offset;
                 let surface_rectangle = Rectangle::from_loc_and_size(location, surface_view.dst);
-                if output_overlap.overlaps(surface_rectangle) {
+                if let Some(mut output_overlap) = output_overlap.intersection(surface_rectangle) {
+                    // Move the overlap relative to the surface
+                    output_overlap.loc -= location;
                     // We found a matching output, check if we already sent enter
-                    output_enter(output, &mut *surface_list, wl_surface, logger);
+                    output_enter(output, &mut *surface_list, output_overlap, wl_surface, logger);
                 } else {
                     // Surface does not match output, if we sent enter earlier
                     // we should now send leave
@@ -89,12 +91,13 @@ fn output_update(
 
 fn output_enter(
     output: &Output,
-    surface_list: &mut HashSet<WlWeak<WlSurface>>,
+    surface_list: &mut HashMap<WlWeak<WlSurface>, Rectangle<i32, Logical>>,
+    output_overlap: Rectangle<i32, Logical>,
     surface: &WlSurface,
     logger: &slog::Logger,
 ) {
     let weak = surface.downgrade();
-    if !surface_list.contains(&weak) {
+    if surface_list.insert(weak, output_overlap).is_none() {
         slog::debug!(
             logger,
             "surface ({:?}) entering output {:?}",
@@ -102,18 +105,17 @@ fn output_enter(
             output.name()
         );
         output.enter(surface);
-        surface_list.insert(weak);
     }
 }
 
 fn output_leave(
     output: &Output,
-    surface_list: &mut HashSet<WlWeak<WlSurface>>,
+    surface_list: &mut HashMap<WlWeak<WlSurface>, Rectangle<i32, Logical>>,
     surface: &WlSurface,
     logger: &slog::Logger,
 ) {
     let weak = surface.downgrade();
-    if surface_list.contains(&weak) {
+    if surface_list.remove(&weak).is_some() {
         slog::debug!(
             logger,
             "surface ({:?}) leaving output {:?}",
@@ -121,7 +123,6 @@ fn output_leave(
             output.name()
         );
         output.leave(surface);
-        surface_list.remove(&weak);
     }
 }
 
@@ -259,4 +260,12 @@ where
 
         render_elements
     }
+}
+
+/// Gets the overlap of a [`WlSurface`] for a specific [`Output`]
+///
+/// Returns [`None`] if the surface is not present on the output
+pub fn surface_output_overlap(surface: &WlSurface, output: &Output) -> Option<Rectangle<i32, Logical>> {
+    let output_surfaces = output_surfaces(output);
+    output_surfaces.get(&surface.downgrade()).copied()
 }
