@@ -38,7 +38,7 @@ use smithay::{
             element::{texture::TextureBuffer, AsRenderElements},
             gles2::{Gles2Renderbuffer, Gles2Renderer},
             multigpu::{egl::EglGlesBackend, GpuManager, MultiRenderer, MultiTexture},
-            Bind, Frame, Renderer,
+            Bind, ExportDma, Frame, Renderer,
         },
         session::{auto::AutoSession, Session, Signal as SessionSignal},
         udev::{all_gpus, primary_gpu, UdevBackend, UdevEvent},
@@ -921,6 +921,8 @@ impl AnvilState<UdevData> {
                     pointer_images.push((frame, texture.clone()));
                     texture
                 });
+
+            let _ = renderer.export_texture(&pointer_image.texture);
 
             let output = if let Some(output) = self.space.outputs().find(|o| {
                 o.user_data().get::<UdevOutputId>()

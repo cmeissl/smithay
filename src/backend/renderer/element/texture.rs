@@ -364,7 +364,7 @@ use super::{CommitCounter, Element, Id, RenderElement, UnderlyingStorage};
 pub struct TextureBuffer<T> {
     id: Id,
     renderer_id: usize,
-    texture: T,
+    pub texture: T,
     scale: i32,
     transform: Transform,
     opaque_regions: Option<Vec<Rectangle<i32, Buffer>>>,
