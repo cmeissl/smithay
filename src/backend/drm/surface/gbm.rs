@@ -13,15 +13,19 @@ use crate::backend::allocator::{
 };
 use crate::backend::drm::{device::DevPath, surface::DrmSurfaceInternal, DrmError, DrmSurface};
 use crate::backend::SwapBuffersError;
+use crate::utils::{Physical, Point, Rectangle, Transform};
 
 use slog::{debug, error, o, trace, warn};
+
+use super::{PlaneConfig, PlaneDamageClips, PlaneState};
 
 /// Simplified abstraction of a swapchain for gbm-buffers displayed on a [`DrmSurface`].
 #[derive(Debug)]
 pub struct GbmBufferedSurface<A: Allocator<BufferObject<()>> + 'static, D: AsRawFd + 'static, U> {
     current_fb: Slot<BufferObject<()>>,
     pending_fb: Option<(Slot<BufferObject<()>>, U)>,
-    queued_fb: Option<(Slot<BufferObject<()>>, U)>,
+    #[allow(clippy::type_complexity)]
+    queued_fb: Option<(Slot<BufferObject<()>>, Option<Vec<Rectangle<i32, Physical>>>, U)>,
     next_fb: Option<Slot<BufferObject<()>>>,
     swapchain: Swapchain<A, BufferObject<()>>,
     drm: Arc<DrmSurface<D>>,
@@ -187,10 +191,29 @@ where
             Ok(dmabuf) => dmabuf,
             Err(err) => return Err((swapchain.allocator, err.into())),
         };
-        let handle = fb.fb;
         buffer.userdata().insert_if_missing(|| fb);
 
-        match drm.test_buffer(handle, &mode, true) {
+        let handle = buffer.userdata().get::<FbHandle<D>>().unwrap();
+
+        let plane_state = PlaneState {
+            handle: drm.plane(),
+            config: Some(PlaneConfig {
+                src: Rectangle::from_loc_and_size(
+                    Point::default(),
+                    (mode.size().0 as i32, mode.size().1 as i32),
+                )
+                .to_f64(),
+                dst: Rectangle::from_loc_and_size(
+                    Point::default(),
+                    (mode.size().0 as i32, mode.size().1 as i32),
+                ),
+                transform: Transform::Normal,
+                damage_clips: None,
+                fb: handle.fb,
+            }),
+        };
+
+        match drm.test_state([plane_state], true) {
             Ok(_) => {
                 debug!(logger, "Choosen format: {:?}", format);
                 Ok((buffer, swapchain))
@@ -237,10 +260,14 @@ where
     /// Otherwise the underlying swapchain will eventually run out of buffers.
     ///
     /// `user_data` can be used to attach some data to a specific buffer and later retrieved with [`GbmBufferedSurface::frame_submitted`]
-    pub fn queue_buffer(&mut self, user_data: U) -> Result<(), Error<A::Error>> {
+    pub fn queue_buffer(
+        &mut self,
+        damage: Option<Vec<Rectangle<i32, Physical>>>,
+        user_data: U,
+    ) -> Result<(), Error<A::Error>> {
         self.queued_fb = self.next_fb.take().map(|fb| {
             self.swapchain.submitted(&fb);
-            (fb, user_data)
+            (fb, damage, user_data)
         });
         if self.pending_fb.is_none() && self.queued_fb.is_some() {
             self.submit()?;
@@ -270,13 +297,36 @@ where
 
     fn submit(&mut self) -> Result<(), Error<A::Error>> {
         // yes it does not look like it, but both of these lines should be safe in all cases.
-        let (slot, user_data) = self.queued_fb.take().unwrap();
-        let fb = slot.userdata().get::<FbHandle<D>>().unwrap().fb;
+        let (slot, damage, user_data) = self.queued_fb.take().unwrap();
+        let handle = slot.userdata().get::<FbHandle<D>>().unwrap();
+        let mode = self.drm.pending_mode();
+        let src =
+            Rectangle::from_loc_and_size(Point::default(), (mode.size().0 as i32, mode.size().1 as i32))
+                .to_f64();
+        let dst =
+            Rectangle::from_loc_and_size(Point::default(), (mode.size().0 as i32, mode.size().1 as i32));
+
+        let damage_clips = damage.and_then(|damage| {
+            PlaneDamageClips::from_damage(self.drm.clone(), src, dst, damage)
+                .ok()
+                .flatten()
+        });
+
+        let plane_state = PlaneState {
+            handle: self.plane(),
+            config: Some(PlaneConfig {
+                src,
+                dst,
+                transform: Transform::Normal,
+                damage_clips: damage_clips.as_ref().map(|d| d.blob()),
+                fb: handle.fb,
+            }),
+        };
 
         let flip = if self.drm.commit_pending() {
-            self.drm.commit([(fb, self.drm.plane())].iter(), true)
+            self.drm.commit([plane_state], true)
         } else {
-            self.drm.page_flip([(fb, self.drm.plane())].iter(), true)
+            self.drm.page_flip([plane_state], true)
         };
         if flip.is_ok() {
             self.pending_fb = Some((slot, user_data));
@@ -372,6 +422,12 @@ where
 struct FbHandle<D: AsRawFd + 'static> {
     drm: Arc<DrmSurface<D>>,
     fb: framebuffer::Handle,
+}
+
+impl<A: AsRawFd + 'static> AsRef<framebuffer::Handle> for FbHandle<A> {
+    fn as_ref(&self) -> &framebuffer::Handle {
+        &self.fb
+    }
 }
 
 impl<A: AsRawFd + 'static> Drop for FbHandle<A> {

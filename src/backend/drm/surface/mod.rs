@@ -14,8 +14,10 @@ pub(super) mod atomic;
 #[cfg(feature = "backend_gbm")]
 pub(super) mod gbm;
 pub(super) mod legacy;
+
 use super::{device::DevPath, error::Error, plane_type, planes, PlaneType, Planes};
 use crate::backend::allocator::{Format, Fourcc, Modifier};
+use crate::utils::{Buffer, Physical, Point, Rectangle, Transform};
 use atomic::AtomicDrmSurface;
 use legacy::LegacyDrmSurface;
 
@@ -33,6 +35,124 @@ pub struct DrmSurface<A: AsRawFd + 'static> {
     pub(super) has_universal_planes: bool,
     #[cfg(feature = "backend_session")]
     pub(super) links: RefCell<Vec<crate::utils::signaling::SignalToken>>,
+}
+
+#[derive(Debug)]
+struct PlaneDamageInner<T: std::ops::Deref<Target = D>, D: drm::control::Device> {
+    drm: T,
+    blob: Option<drm::control::property::Value<'static>>,
+}
+
+impl<T: std::ops::Deref<Target = D>, D: drm::control::Device> Drop for PlaneDamageInner<T, D> {
+    fn drop(&mut self) {
+        // There is nothing we can do if that fails
+        if let Some(drm::control::property::Value::Blob(id)) = self.blob.take() {
+            let _ = self.drm.destroy_property_blob(id);
+        }
+    }
+}
+
+#[derive(Debug)]
+/// Helper for `FB_DAMAGE_CLIPS`
+pub struct PlaneDamageClips<T: std::ops::Deref<Target = D>, D: drm::control::Device> {
+    inner: Arc<PlaneDamageInner<T, D>>,
+}
+
+impl<T: std::ops::Deref<Target = D>, D: drm::control::Device> PlaneDamageClips<T, D> {
+    /// Returns the underlying blob
+    pub fn blob(&self) -> drm::control::property::Value<'_> {
+        self.inner.blob.unwrap()
+    }
+}
+
+impl<T: std::ops::Deref<Target = D>, D: drm::control::Device> PlaneDamageClips<T, D> {
+    /// Initialize damage clips for a a plane
+    pub fn from_damage(
+        device: T,
+        src: Rectangle<f64, Buffer>,
+        dst: Rectangle<i32, Physical>,
+        damage: impl IntoIterator<Item = Rectangle<i32, Physical>>,
+    ) -> Result<Option<Self>, drm_ffi::result::SystemError> {
+        let scale = src.size / dst.size.to_logical(1).to_buffer(1, Transform::Normal).to_f64();
+
+        let mut rects = damage
+            .into_iter()
+            .map(|rect| {
+                let mut rect = rect
+                    .to_f64()
+                    .to_logical(1f64)
+                    .to_buffer(
+                        1f64,
+                        Transform::Normal,
+                        &src.size.to_logical(1f64, Transform::Normal),
+                    )
+                    .upscale(scale);
+                rect.loc += src.loc;
+                let rect = rect.to_i32_up();
+
+                drm_ffi::drm_mode_rect {
+                    x1: rect.loc.x,
+                    y1: rect.loc.y,
+                    x2: rect.loc.x.saturating_add(rect.size.w),
+                    y2: rect.loc.y.saturating_add(rect.size.h),
+                }
+            })
+            .collect::<Vec<_>>();
+
+        if rects.is_empty() {
+            return Ok(None);
+        }
+
+        let data = unsafe {
+            std::slice::from_raw_parts_mut(
+                rects.as_mut_ptr() as *mut u8,
+                std::mem::size_of::<drm_ffi::drm_mode_rect>() * rects.len(),
+            )
+        };
+
+        let blob = drm_ffi::mode::create_property_blob(device.as_raw_fd(), data)?;
+
+        Ok(Some(PlaneDamageClips {
+            inner: Arc::new(PlaneDamageInner {
+                drm: device,
+                blob: Some(drm::control::property::Value::Blob(blob.blob_id as u64)),
+            }),
+        }))
+    }
+}
+
+impl<T: std::ops::Deref<Target = D>, D: drm::control::Device> Clone for PlaneDamageClips<T, D> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
+}
+
+/// State of a single plane
+#[derive(Debug, Clone)]
+pub struct PlaneState<'a> {
+    /// Handle of the plane
+    pub handle: plane::Handle,
+    /// Configuration for that plane
+    ///
+    /// Can be `None` if nothing is attached
+    pub config: Option<PlaneConfig<'a>>,
+}
+
+/// Configuration for a single plane
+#[derive(Debug, Copy, Clone)]
+pub struct PlaneConfig<'a> {
+    /// Source [`Rectangle`] of the attached framebuffer
+    pub src: Rectangle<f64, Buffer>,
+    /// Destination [`Rectangle`] on the CRTC
+    pub dst: Rectangle<i32, Physical>,
+    /// Transform for the attached framebuffer
+    pub transform: Transform,
+    /// Damage clips of the attached framebuffer
+    pub damage_clips: Option<drm::control::property::Value<'a>>,
+    /// Framebuffer handle
+    pub fb: framebuffer::Handle,
 }
 
 #[derive(Debug)]
@@ -153,29 +273,6 @@ impl<A: AsRawFd + 'static> DrmSurface<A> {
         }
     }
 
-    /// Tries to setup a cursor or overlay [`Plane`](drm::control::plane)
-    /// to be set at the next commit/page_flip with the given position and size.
-    ///
-    /// Planes can have arbitrary hardware constraints, that cannot be expressed in the api,
-    /// like supporting only positions at even or odd values, allowing only certain sizes or disallowing overlapping planes.
-    /// Using planes should therefor be done in a best-efford manner. Failures on `page_flip` or `commit`
-    /// should be expected and alternative code paths without the usage of planes prepared.
-    ///
-    /// Fails if tests for the given plane fail, if the underlying
-    /// implementation does not support the use of planes or if the plane
-    /// is not supported by this crtc.
-    pub fn use_plane(
-        &self,
-        plane: plane::Handle,
-        position: (i32, i32),
-        size: (u32, u32),
-    ) -> Result<(), Error> {
-        match &*self.internal {
-            DrmSurfaceInternal::Atomic(surf) => surf.use_plane(plane, position, size),
-            DrmSurfaceInternal::Legacy(_) => Err(Error::NonPrimaryPlane(plane)),
-        }
-    }
-
     /// Disables the given plane.
     ///
     /// Errors if the plane is not supported by this crtc or if the underlying
@@ -210,22 +307,48 @@ impl<A: AsRawFd + 'static> DrmSurface<A> {
     /// but will trigger a `vblank` event once done.
     /// Make sure to have the device registered in your event loop prior to invoking this, to not miss
     /// any generated event.
+    pub fn test_state<'a>(
+        &self,
+        planes: impl IntoIterator<Item = PlaneState<'a>>,
+        allow_modeset: bool,
+    ) -> Result<bool, Error> {
+        match &*self.internal {
+            DrmSurfaceInternal::Atomic(surf) => surf.test_state(planes, allow_modeset),
+            DrmSurfaceInternal::Legacy(surf) => {
+                let fb = ensure_legacy_planes(self, planes)?;
+
+                if allow_modeset {
+                    surf.test_buffer(fb, &self.pending_mode())
+                } else {
+                    // Legacy can not test a buffer without triggering a modeset, so we can
+                    // only assume it works and hope for the best. A later call to commit or
+                    // page_flip will show the correct result
+                    Ok(true)
+                }
+            }
+        }
+    }
+
+    /// Commit the pending state rendering a given framebuffer.
+    ///
+    /// *Note*: This will trigger a full modeset on the underlying device,
+    /// potentially causing some flickering. Check before performing this
+    /// operation if a commit really is necessary using [`commit_pending`](DrmSurface::commit_pending).
+    ///
+    /// This operation is not necessarily blocking until the crtc is in the desired state,
+    /// but will trigger a `vblank` event once done.
+    /// Make sure to have the device registered in your event loop prior to invoking this, to not miss
+    /// any generated event.
     pub fn commit<'a>(
         &self,
-        mut framebuffers: impl Iterator<Item = &'a (framebuffer::Handle, plane::Handle)>,
+        planes: impl IntoIterator<Item = PlaneState<'a>>,
         event: bool,
     ) -> Result<(), Error> {
         match &*self.internal {
-            DrmSurfaceInternal::Atomic(surf) => surf.commit(framebuffers, event),
+            DrmSurfaceInternal::Atomic(surf) => surf.commit(planes, event),
             DrmSurfaceInternal::Legacy(surf) => {
-                if let Some((fb, plane)) = framebuffers.next() {
-                    if plane_type(self, *plane)? != PlaneType::Primary {
-                        return Err(Error::NonPrimaryPlane(*plane));
-                    }
-                    surf.commit(*fb, event)
-                } else {
-                    Ok(())
-                }
+                let fb = ensure_legacy_planes(self, planes)?;
+                surf.commit(fb, event)
             }
         }
     }
@@ -239,20 +362,14 @@ impl<A: AsRawFd + 'static> DrmSurface<A> {
     /// Make sure to have the device registered in your event loop to not miss the event.
     pub fn page_flip<'a>(
         &self,
-        mut framebuffers: impl Iterator<Item = &'a (framebuffer::Handle, plane::Handle)>,
+        planes: impl IntoIterator<Item = PlaneState<'a>>,
         event: bool,
     ) -> Result<(), Error> {
         match &*self.internal {
-            DrmSurfaceInternal::Atomic(surf) => surf.page_flip(framebuffers, event),
+            DrmSurfaceInternal::Atomic(surf) => surf.page_flip(planes, event),
             DrmSurfaceInternal::Legacy(surf) => {
-                if let Some((fb, plane)) = framebuffers.next() {
-                    if plane_type(self, *plane)? != PlaneType::Primary {
-                        return Err(Error::NonPrimaryPlane(*plane));
-                    }
-                    surf.page_flip(*fb, event)
-                } else {
-                    Ok(())
-                }
+                let fb = ensure_legacy_planes(self, planes)?;
+                surf.page_flip(fb, event)
             }
         }
     }
@@ -387,58 +504,13 @@ impl<A: AsRawFd + 'static> DrmSurface<A> {
 
     /// Returns a set of available planes for this surface
     pub fn planes(&self) -> Result<Planes, Error> {
-        planes(self, &self.crtc, self.has_universal_planes)
-    }
+        let has_universal_planes = match &*self.internal {
+            DrmSurfaceInternal::Atomic(_) => self.has_universal_planes,
+            // Disable the planes on legacy, we do not support them on legacy anyway
+            DrmSurfaceInternal::Legacy(_) => false,
+        };
 
-    /// Tests if a framebuffer can be used with this surface.
-    ///
-    /// # Arguments
-    ///
-    /// - `fb` - Framebuffer handle that has an attached buffer, that shall be tested
-    /// - `mode` - The mode that should be used to display the buffer
-    /// - `allow_screen_change` - If an actual screen change is permitted to carry out this test.
-    ///    If the test cannot be performed otherwise, this function returns false.
-    pub fn test_buffer(
-        &self,
-        fb: framebuffer::Handle,
-        mode: &Mode,
-        allow_screen_change: bool,
-    ) -> Result<bool, Error> {
-        match &*self.internal {
-            DrmSurfaceInternal::Atomic(surf) => surf.test_buffer(fb, mode),
-            DrmSurfaceInternal::Legacy(surf) => {
-                if allow_screen_change {
-                    surf.test_buffer(fb, mode)
-                } else {
-                    Ok(false)
-                }
-            } // There is no test-commiting with the legacy interface
-        }
-    }
-
-    /// Tests if a framebuffer can be used with this surface and a given plane.
-    ///
-    /// # Arguments
-    ///
-    /// - `fb` - Framebuffer handle that has an attached buffer, that shall be tested
-    /// - `plane` - The plane that should be used to display the buffer
-    ///     (only works for *cursor* and *overlay* planes - for primary planes use `test_buffer`)
-    /// - `position` - The position of the plane
-    /// - `size` - The size of the plane
-    ///
-    /// If the test cannot be performed, this function returns false.
-    /// This is always the case for non-atomic surfaces.
-    pub fn test_plane_buffer(
-        &self,
-        fb: framebuffer::Handle,
-        plane: plane::Handle,
-        position: (i32, i32),
-        size: (u32, u32),
-    ) -> Result<bool, Error> {
-        match &*self.internal {
-            DrmSurfaceInternal::Atomic(surf) => surf.test_plane_buffer(fb, plane, position, size),
-            DrmSurfaceInternal::Legacy(_) => Ok(false), // There is no test-commiting with the legacy interface
-        }
+        planes(self, &self.crtc, has_universal_planes)
     }
 
     /// Re-evaluates the current state of the crtc.
@@ -452,4 +524,46 @@ impl<A: AsRawFd + 'static> DrmSurface<A> {
             DrmSurfaceInternal::Legacy(surf) => surf.reset_state::<Self>(None),
         }
     }
+}
+
+fn ensure_legacy_planes<'a>(
+    dev: &impl ControlDevice,
+    planes: impl IntoIterator<Item = PlaneState<'a>>,
+) -> Result<framebuffer::Handle, Error> {
+    let state = planes.into_iter().next().ok_or(Error::NoPlane)?;
+
+    if plane_type(dev, state.handle)? != PlaneType::Primary {
+        return Err(Error::NonPrimaryPlane(state.handle));
+    }
+
+    let Some(config) = state.config else {
+        // we need a config on the primary plane
+        return Err(Error::NoFramebuffer(state.handle));
+    };
+
+    if config.dst.loc != Point::default() {
+        // legacy does not support crtc position (technically we could do it,
+        // but the position can only be changed by commit, not by page-flip,
+        // so we just not allow it)
+        return Err(Error::UnsupportedPlaneConfiguration(state.handle));
+    }
+
+    if config.src.loc != Point::default()
+        || config
+            .src
+            .size
+            .to_logical(1.0, Transform::Normal)
+            .to_physical(1.0)
+            != config.dst.size.to_f64()
+    {
+        // legacy does not support crop nor scale
+        return Err(Error::UnsupportedPlaneConfiguration(state.handle));
+    }
+
+    if config.transform != Transform::Normal {
+        // legacy does not support transform
+        return Err(Error::UnsupportedPlaneConfiguration(state.handle));
+    }
+
+    Ok(config.fb)
 }
