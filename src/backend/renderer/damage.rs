@@ -315,7 +315,7 @@ impl DamageTrackedRenderer {
         let mut damage: Vec<Rectangle<i32, Physical>> = Vec::new();
         let mut render_elements: Vec<&E> = Vec::with_capacity(elements.len());
         let mut opaque_regions: Vec<(usize, Vec<Rectangle<i32, Physical>>)> = Vec::new();
-        let result = self.damage_output_internal(
+        let states = self.damage_output_internal(
             age,
             elements,
             &log,
@@ -325,6 +325,10 @@ impl DamageTrackedRenderer {
             &mut render_elements,
             &mut opaque_regions,
         );
+
+        if damage.is_empty() {
+            return Ok((None, states));
+        }
 
         let render_res = (|| {
             let mut frame = renderer.render(output_size, output_transform)?;
@@ -374,8 +378,16 @@ impl DamageTrackedRenderer {
                     .collect::<Vec<_>>();
 
                 if element_damage.is_empty() {
+                    slog::trace!(log, "skipping element {:?}, no damage", element.id());
                     continue;
                 }
+
+                slog::trace!(
+                    log,
+                    "drawing element {:?} with damage: {:?}",
+                    element.id(),
+                    element_damage
+                );
 
                 element.draw(&mut frame, element.src(), element_geometry, &element_damage, &log)?;
             }
@@ -390,7 +402,7 @@ impl DamageTrackedRenderer {
             return Err(DamageTrackedRendererError::Rendering(err));
         }
 
-        Ok(result)
+        Ok((Some(damage), states))
     }
 
     /// Damage this output and return the damage without actually rendering the difference
@@ -412,8 +424,7 @@ impl DamageTrackedRenderer {
         let mut damage: Vec<Rectangle<i32, Physical>> = Vec::new();
         let mut render_elements: Vec<&E> = Vec::with_capacity(elements.len());
         let mut opaque_regions: Vec<(usize, Vec<Rectangle<i32, Physical>>)> = Vec::new();
-
-        Ok(self.damage_output_internal(
+        let states = self.damage_output_internal(
             age,
             elements,
             &log,
@@ -422,7 +433,13 @@ impl DamageTrackedRenderer {
             &mut damage,
             &mut render_elements,
             &mut opaque_regions,
-        ))
+        );
+
+        if damage.is_empty() {
+            return Ok((None, states));
+        }
+
+        Ok((Some(damage), states))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -436,7 +453,7 @@ impl DamageTrackedRenderer {
         damage: &mut Vec<Rectangle<i32, Physical>>,
         render_elements: &mut Vec<&'a E>,
         opaque_regions: &mut Vec<(usize, Vec<Rectangle<i32, Physical>>)>,
-    ) -> (Option<Vec<Rectangle<i32, Physical>>>, RenderElementStates)
+    ) -> RenderElementStates
     where
         E: Element,
     {
@@ -534,12 +551,15 @@ impl DamageTrackedRenderer {
                     .iter()
                     .filter(|(z_index, _)| *z_index < state.last_z_index)
                     .flat_map(|(_, opaque_regions)| opaque_regions)
-                    .fold(vec![state.last_geometry], |damage, opaque_region| {
-                        damage
-                            .into_iter()
-                            .flat_map(|damage| damage.subtract_rect(*opaque_region))
-                            .collect::<Vec<_>>()
-                    })
+                    .fold(
+                        vec![state.last_geometry.intersection(output_geo).unwrap()],
+                        |damage, opaque_region| {
+                            damage
+                                .into_iter()
+                                .flat_map(|damage| damage.subtract_rect(*opaque_region))
+                                .collect::<Vec<_>>()
+                        },
+                    )
             })
             .collect::<Vec<_>>();
         damage.extend(elements_gone);
@@ -553,9 +573,9 @@ impl DamageTrackedRenderer {
                 .map(|s| s.last_geometry != element_geometry || s.last_z_index != z_index)
                 .unwrap_or(false)
             {
-                let mut element_damage = vec![element_geometry];
+                let mut element_damage = vec![element_geometry.intersection(output_geo).unwrap()];
                 if let Some(old_geo) = element_last_state.map(|s| s.last_geometry) {
-                    element_damage.push(old_geo);
+                    element_damage.push(old_geo.intersection(output_geo).unwrap());
                 }
                 damage.extend(
                     opaque_regions
@@ -625,7 +645,7 @@ impl DamageTrackedRenderer {
 
         if damage.is_empty() {
             slog::trace!(log, "nothing damaged, exiting early");
-            return (None, element_render_states);
+            return element_render_states;
         }
 
         slog::trace!(log, "damage to be rendered: {:#?}", &damage);
@@ -647,8 +667,8 @@ impl DamageTrackedRenderer {
             .collect();
         self.last_state.size = Some(output_geo.size);
         self.last_state.elements = new_elements_state;
-        self.last_state.old_damage.push_front(new_damage.clone());
+        self.last_state.old_damage.push_front(new_damage);
 
-        (Some(new_damage), element_render_states)
+        element_render_states
     }
 }
