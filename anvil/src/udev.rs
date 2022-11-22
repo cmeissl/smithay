@@ -15,6 +15,7 @@ use slog::Logger;
 use crate::{
     drawing::*,
     render::*,
+    shell::FullscreenSurface,
     state::{post_repaint, take_presentation_feedback, AnvilState, Backend, CalloopData},
 };
 #[cfg(feature = "debug")]
@@ -30,22 +31,27 @@ use smithay::{
 };
 use smithay::{
     backend::{
-        drm::{DrmDevice, DrmError, DrmEvent, DrmEventMetadata, DrmNode, GbmBufferedSurface, NodeType},
+        drm::{renderer::DrmRenderer, DrmDevice, DrmError, DrmEvent, DrmEventMetadata, DrmNode, NodeType},
         egl::{EGLContext, EGLDevice, EGLDisplay},
         libinput::{LibinputInputBackend, LibinputSessionInterface},
         renderer::{
-            damage::{DamageTrackedRenderer, DamageTrackedRendererError},
-            element::{texture::TextureBuffer, AsRenderElements},
+            damage::DamageTrackedRendererError,
+            element::{
+                surface::WaylandSurfaceRenderElement,
+                texture::TextureBuffer,
+                utils::{CropRenderElement, RelocateRenderElement, RescaleRenderElement},
+                AsRenderElements,
+            },
             gles2::{Gles2Renderbuffer, Gles2Renderer},
             multigpu::{egl::EglGlesBackend, GpuManager, MultiRenderer, MultiTexture},
-            Bind, Frame, Renderer,
+            DebugFlags, ImportAll,
         },
         session::{auto::AutoSession, Session, Signal as SessionSignal},
         udev::{all_gpus, primary_gpu, UdevBackend, UdevEvent},
         SwapBuffersError,
     },
     desktop::{
-        space::{Space, SurfaceTree},
+        space::{Space, SpaceRenderElements, SurfaceTree},
         utils::OutputPresentationFeedback,
         Window,
     },
@@ -65,7 +71,7 @@ use smithay::{
                 Device as ControlDevice,
             },
         },
-        gbm::Device as GbmDevice,
+        gbm::{BufferObject, Device as GbmDevice},
         input::Libinput,
         nix::{fcntl::OFlag, sys::stat::dev_t},
         wayland_protocols::wp::presentation_time::server::wp_presentation_feedback,
@@ -73,7 +79,7 @@ use smithay::{
     },
     utils::{
         signaling::{Linkable, SignalToken, Signaler},
-        Clock, IsAlive, Logical, Monotonic, Point, Rectangle, Scale, Transform,
+        Clock, IsAlive, Logical, Monotonic, Point, Scale, Transform,
     },
     wayland::{
         compositor,
@@ -84,7 +90,7 @@ use smithay::{
 type UdevRenderer<'a> =
     MultiRenderer<'a, 'a, EglGlesBackend<Gles2Renderer>, EglGlesBackend<Gles2Renderer>, Gles2Renderbuffer>;
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub struct SessionFd(RawFd);
 impl AsRawFd for SessionFd {
     fn as_raw_fd(&self) -> RawFd {
@@ -112,7 +118,27 @@ pub struct UdevData {
     fps_texture: MultiTexture,
     signaler: Signaler<SessionSignal>,
     pointer_image: crate::cursor::Cursor,
+    debug_flags: DebugFlags,
     logger: slog::Logger,
+}
+
+impl UdevData {
+    pub fn set_debug_flags(&mut self, flags: DebugFlags) {
+        if self.debug_flags != flags {
+            self.debug_flags = flags;
+
+            for (_, backend) in self.backends.iter_mut() {
+                let surfaces = backend.surfaces.borrow();
+                for (_, surface) in surfaces.iter() {
+                    surface.borrow_mut().renderer.set_debug_flags(flags);
+                }
+            }
+        }
+    }
+
+    pub fn debug_flags(&self) -> DebugFlags {
+        self.debug_flags
+    }
 }
 
 #[cfg(feature = "egl")]
@@ -143,7 +169,7 @@ impl Backend for UdevData {
             if let Some(gpu) = self.backends.get(&id.device_id) {
                 let surfaces = gpu.surfaces.borrow();
                 if let Some(surface) = surfaces.get(&id.crtc) {
-                    surface.borrow_mut().surface.reset_buffers();
+                    surface.borrow_mut().renderer.reset_buffers();
                 }
             }
         }
@@ -157,6 +183,13 @@ impl Backend for UdevData {
             warn!(self.logger, "Early buffer import failed: {}", err);
         }
     }
+}
+
+smithay::backend::renderer::element::render_elements! {
+    OutputRenderElements<R, E> where R: ImportAll;
+    Space=SpaceRenderElements<R, E>,
+    Custom=CustomRenderElements<R>,
+    Preview=CropRenderElement<RelocateRenderElement<RescaleRenderElement<WaylandSurfaceRenderElement<R>>>>,
 }
 
 pub fn run_udev(log: Logger) {
@@ -224,7 +257,6 @@ pub fn run_udev(log: Logger) {
             log,
             "Trying to initialize EGL Hardware Acceleration via {:?}", primary_gpu
         );
-
         if renderer.bind_wl_display(&display.handle()).is_ok() {
             info!(log, "EGL hardware-acceleration enabled");
             let dmabuf_formats = renderer.dmabuf_formats().cloned().collect::<Vec<_>>();
@@ -254,6 +286,7 @@ pub fn run_udev(log: Logger) {
         pointer_element: PointerElement::default(),
         #[cfg(feature = "debug")]
         fps_texture,
+        debug_flags: DebugFlags::empty(),
         logger: log.clone(),
     };
     let mut state = AnvilState::init(&mut display, event_loop.handle(), data, log.clone(), true);
@@ -337,16 +370,20 @@ pub fn run_udev(log: Logger) {
     }
 }
 
-pub type RenderSurface =
-    GbmBufferedSurface<Rc<RefCell<GbmDevice<SessionFd>>>, SessionFd, Option<OutputPresentationFeedback>>;
+pub type GbmDrmRenderer = DrmRenderer<
+    Rc<RefCell<GbmDevice<SessionFd>>>,
+    BufferObject<()>,
+    SessionFd,
+    Rc<RefCell<GbmDevice<SessionFd>>>,
+    Option<OutputPresentationFeedback>,
+>;
 
 struct SurfaceData {
     dh: DisplayHandle,
     device_id: DrmNode,
     render_node: DrmNode,
-    surface: RenderSurface,
     global: Option<GlobalId>,
-    damage_tracked_renderer: DamageTrackedRenderer,
+    renderer: GbmDrmRenderer,
     #[cfg(feature = "debug")]
     fps: fps_ticker::Fps,
     #[cfg(feature = "debug")]
@@ -378,6 +415,7 @@ fn scan_connectors(
     space: &mut Space<Window>,
     #[cfg(feature = "debug")] fps_texture: &MultiTexture,
     signaler: &Signaler<SessionSignal>,
+    debug_flags: DebugFlags,
     logger: &::slog::Logger,
 ) -> HashMap<crtc::Handle, Rc<RefCell<SurfaceData>>> {
     // Get a set of all modesetting resource handles (excluding planes):
@@ -444,15 +482,6 @@ fn scan_connectors(
             };
             surface.link(signaler.clone());
 
-            let gbm_surface =
-                match GbmBufferedSurface::new(surface, gbm.clone(), formats.clone(), logger.clone()) {
-                    Ok(renderer) => renderer,
-                    Err(err) => {
-                        warn!(logger, "Failed to create rendering surface: {}", err);
-                        continue;
-                    }
-                };
-
             let size = mode.size();
             let mode = Mode {
                 size: (size.0 as i32, size.1 as i32).into(),
@@ -500,17 +529,33 @@ fn scan_connectors(
                 .user_data()
                 .insert_if_missing(|| UdevOutputId { crtc, device_id });
 
-            let damage_tracked_renderer = DamageTrackedRenderer::from_output(&output);
             #[cfg(feature = "debug")]
             let fps_element = FpsElement::new(fps_texture.clone());
+
+            let mut drm_renderer = match DrmRenderer::new(
+                &output,
+                surface,
+                None,
+                gbm.clone(),
+                gbm.clone(),
+                formats.clone(),
+                device.cursor_size(),
+                logger.clone(),
+            ) {
+                Ok(renderer) => renderer,
+                Err(err) => {
+                    warn!(logger, "Failed to create drm renderer: {}", err);
+                    continue;
+                }
+            };
+            drm_renderer.set_debug_flags(debug_flags);
 
             entry.insert(Rc::new(RefCell::new(SurfaceData {
                 dh: display.handle(),
                 device_id,
                 render_node,
-                surface: gbm_surface,
                 global: Some(global),
-                damage_tracked_renderer,
+                renderer: drm_renderer,
                 #[cfg(feature = "debug")]
                 fps: fps_ticker::Fps::default(),
                 #[cfg(feature = "debug")]
@@ -571,6 +616,7 @@ impl AnvilState<UdevData> {
             #[cfg(feature = "debug")]
             &self.backend_data.fps_texture,
             &self.backend_data.signaler,
+            self.backend_data.debug_flags,
             &self.log,
         )));
 
@@ -660,6 +706,7 @@ impl AnvilState<UdevData> {
                 #[cfg(feature = "debug")]
                 &self.backend_data.fps_texture,
                 &signaler,
+                self.backend_data.debug_flags,
                 &logger,
             );
 
@@ -746,7 +793,7 @@ impl AnvilState<UdevData> {
         };
 
         let schedule_render = match surface
-            .surface
+            .renderer
             .frame_submitted()
             .map_err(Into::<SwapBuffersError>::into)
         {
@@ -1016,10 +1063,7 @@ fn render_surface<'a>(
     let output_geometry = space.output_geometry(output).unwrap();
     let scale = Scale::from(output.current_scale().fractional_scale());
 
-    let (dmabuf, age) = surface.surface.next_buffer()?;
-    renderer.bind(dmabuf)?;
-
-    let mut elements: Vec<CustomRenderElements<_>> = Vec::new();
+    let mut custom_elements: Vec<CustomRenderElements<_>> = Vec::new();
     // draw input method surface if any
     let rectangle = input_method.coordinates();
     let position = Point::from((
@@ -1027,7 +1071,7 @@ fn render_surface<'a>(
         rectangle.loc.y + rectangle.size.h,
     ));
     input_method.with_surface(|surface| {
-        elements.extend(AsRenderElements::<UdevRenderer<'a>>::render_elements(
+        custom_elements.extend(AsRenderElements::<UdevRenderer<'a>>::render_elements(
             &SurfaceTree::from_surface(surface),
             renderer,
             position.to_physical_precise_round(scale),
@@ -1069,13 +1113,13 @@ fn render_surface<'a>(
             pointer_element.set_status(cursor_status.clone());
         }
 
-        elements.extend(pointer_element.render_elements(renderer, cursor_pos_scaled, scale));
+        custom_elements.extend(pointer_element.render_elements(renderer, cursor_pos_scaled, scale));
 
         // draw the dnd icon if applicable
         {
             if let Some(wl_surface) = dnd_icon.as_ref() {
                 if wl_surface.alive() {
-                    elements.extend(AsRenderElements::<UdevRenderer<'a>>::render_elements(
+                    custom_elements.extend(AsRenderElements::<UdevRenderer<'a>>::render_elements(
                         &SurfaceTree::from_surface(wl_surface),
                         renderer,
                         cursor_pos_scaled,
@@ -1090,37 +1134,64 @@ fn render_surface<'a>(
     {
         surface.fps_element.update_fps(surface.fps.avg().round() as u32);
         surface.fps.tick();
-        elements.push(CustomRenderElements::Fps(surface.fps_element.clone()));
+        custom_elements.push(CustomRenderElements::Fps(surface.fps_element.clone()));
     }
 
-    // and draw to our buffer
-    let (damage, states) = render_output(
-        output,
-        space,
-        &elements,
-        renderer,
-        &mut surface.damage_tracked_renderer,
-        age.into(),
-        show_window_preview,
-        logger,
-    )
-    .map_err(|err| match err {
-        DamageTrackedRendererError::Rendering(err) => SwapBuffersError::from(err),
-        _ => unreachable!(),
-    })?;
+    let mut elements = Vec::new();
+    elements.extend(custom_elements.into_iter().map(OutputRenderElements::Custom));
+
+    let clear_color = if let Some(window) = output
+        .user_data()
+        .get::<FullscreenSurface>()
+        .and_then(|f| f.get())
+    {
+        let scale = output.current_scale().fractional_scale().into();
+        let window_render_elements =
+            AsRenderElements::<UdevRenderer<'_>>::render_elements(&window, renderer, (0, 0).into(), scale);
+
+        elements.extend(
+            window_render_elements
+                .into_iter()
+                .map(OutputRenderElements::Custom),
+        );
+        CLEAR_COLOR_FULLSCREEN
+    } else {
+        if show_window_preview && space.elements_for_output(output).count() > 0 {
+            elements.extend(space_preview_elements(renderer, space, output));
+        }
+
+        let space_elements =
+            smithay::desktop::space::space_render_elements::<_, Window, _>(renderer, [space], output)
+                .expect("failed to get space render elements");
+        elements.extend(space_elements.into_iter().map(OutputRenderElements::Space));
+        CLEAR_COLOR
+    };
+
+    let (rendered, states) = surface
+        .renderer
+        .render_frame::<_, OutputRenderElements<_, _>, _>(renderer, &elements, clear_color, logger.clone())
+        .map(|(damage, states)| (damage.is_some(), states))
+        .map_err(|err| match err {
+            smithay::backend::drm::renderer::RenderFrameError::PrepareFrame(err) => {
+                SwapBuffersError::from(err)
+            }
+            smithay::backend::drm::renderer::RenderFrameError::RenderFrame(
+                DamageTrackedRendererError::Rendering(err),
+            ) => SwapBuffersError::from(err),
+            _ => unreachable!(),
+        })?;
 
     post_repaint(output, &states, space, clock.now());
 
-    if let Some(damage) = damage {
+    if rendered {
         let output_presentation_feedback = take_presentation_feedback(output, space, &states);
         surface
-            .surface
-            .queue_buffer(Some(damage), Some(output_presentation_feedback))
+            .renderer
+            .queue_frame(Some(output_presentation_feedback))
             .map_err(Into::<SwapBuffersError>::into)?;
-        Ok(true)
-    } else {
-        Ok(false)
     }
+
+    Ok(rendered)
 }
 
 fn schedule_initial_render(
@@ -1133,7 +1204,7 @@ fn schedule_initial_render(
     let result = {
         let mut renderer = gpus.renderer::<Gles2Renderbuffer>(&node, &node).unwrap();
         let mut surface = surface.borrow_mut();
-        initial_render(&mut surface.surface, &mut renderer)
+        initial_render(&mut surface, &mut renderer, &logger)
     };
     if let Err(err) = result {
         match err {
@@ -1152,18 +1223,24 @@ fn schedule_initial_render(
 }
 
 fn initial_render(
-    surface: &mut RenderSurface,
+    surface: &mut SurfaceData,
     renderer: &mut UdevRenderer<'_>,
+    logger: &::slog::Logger,
 ) -> Result<(), SwapBuffersError> {
-    let (dmabuf, _) = surface.next_buffer()?;
-    renderer.bind(dmabuf)?;
-    // Does not matter if we render an empty frame
-    let mut frame = renderer
-        .render((1, 1).into(), Transform::Normal)
-        .map_err(Into::<SwapBuffersError>::into)?;
-    frame.clear(CLEAR_COLOR, &[Rectangle::from_loc_and_size((0, 0), (1, 1))])?;
-    frame.finish().map_err(Into::<SwapBuffersError>::into)?;
-    surface.queue_buffer(None, None)?;
-    surface.reset_buffers();
+    surface
+        .renderer
+        .render_frame::<_, CustomRenderElements<_>, _>(renderer, &[], CLEAR_COLOR, logger.clone())
+        .map_err(|err| match err {
+            smithay::backend::drm::renderer::RenderFrameError::PrepareFrame(err) => {
+                SwapBuffersError::from(err)
+            }
+            smithay::backend::drm::renderer::RenderFrameError::RenderFrame(
+                DamageTrackedRendererError::Rendering(err),
+            ) => SwapBuffersError::from(err),
+            _ => unreachable!(),
+        })?;
+    surface.renderer.queue_frame(None)?;
+    surface.renderer.reset_buffers();
+
     Ok(())
 }
