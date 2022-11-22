@@ -69,6 +69,8 @@
 //! to allocate buffers for use in X11 or Wayland. If you need to do mode setting, you should use
 //! [`DrmDevice`] instead.
 
+#[cfg(feature = "wayland_frontend")]
+pub mod compositor;
 pub(crate) mod device;
 pub(self) mod error;
 pub mod node;
