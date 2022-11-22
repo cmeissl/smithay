@@ -72,6 +72,8 @@
 pub(crate) mod device;
 pub(self) mod error;
 pub mod node;
+#[cfg(feature = "wayland_frontend")]
+pub mod renderer;
 
 #[cfg(feature = "backend_session")]
 pub(self) mod session;
