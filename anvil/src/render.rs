@@ -47,6 +47,68 @@ smithay::backend::renderer::element::render_elements! {
     Preview=CropRenderElement<RelocateRenderElement<RescaleRenderElement<WindowRenderElement<R>>>>,
 }
 
+pub fn space_preview_elements<'a, R, C>(
+    renderer: &'a mut R,
+    space: &'a Space<WindowElement>,
+    output: &'a Output,
+) -> impl Iterator<Item = C> + 'a
+where
+    R: Renderer + ImportAll + ImportMem,
+    R::TextureId: Clone + 'static,
+    C: From<CropRenderElement<RelocateRenderElement<RescaleRenderElement<WindowRenderElement<R>>>>> + 'a,
+{
+    let constrain_behavior = ConstrainBehavior {
+        reference: ConstrainReference::BoundingBox,
+        behavior: ConstrainScaleBehavior::Fit,
+        align: ConstrainAlign::CENTER,
+    };
+
+    let preview_padding = 10;
+
+    let elements_on_space = space.elements_for_output(output).count();
+    let output_scale = output.current_scale().fractional_scale();
+    let output_transform = output.current_transform();
+    let output_size = output
+        .current_mode()
+        .map(|mode| {
+            output_transform
+                .transform_size(mode.size)
+                .to_f64()
+                .to_logical(output_scale)
+        })
+        .unwrap_or_default();
+
+    let max_elements_per_row = 4;
+    let elements_per_row = usize::min(elements_on_space, max_elements_per_row);
+    let rows = f64::ceil(elements_on_space as f64 / elements_per_row as f64);
+
+    let preview_size = Size::from((
+        f64::round(output_size.w / elements_per_row as f64) as i32 - preview_padding * 2,
+        f64::round(output_size.h / rows) as i32 - preview_padding * 2,
+    ));
+
+    space
+        .elements_for_output(output)
+        .enumerate()
+        .flat_map(move |(element_index, window)| {
+            let column = element_index % elements_per_row;
+            let row = element_index / elements_per_row;
+            let preview_location = Point::from((
+                preview_padding + (preview_padding + preview_size.w) * column as i32,
+                preview_padding + (preview_padding + preview_size.h) * row as i32,
+            ));
+            let constrain = Rectangle::from_loc_and_size(preview_location, preview_size);
+            constrain_space_element(
+                renderer,
+                window,
+                preview_location,
+                output_scale,
+                constrain,
+                constrain_behavior,
+            )
+        })
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn render_output<'a, R>(
     output: &Output,
@@ -89,55 +151,7 @@ where
             .collect::<Vec<_>>();
 
         if show_window_preview && space.elements_for_output(output).count() > 0 {
-            let constrain_behavior = ConstrainBehavior {
-                reference: ConstrainReference::BoundingBox,
-                behavior: ConstrainScaleBehavior::Fit,
-                align: ConstrainAlign::CENTER,
-            };
-
-            let preview_padding = 10;
-
-            let elements_on_space = space.elements_for_output(output).count();
-            let output_scale = output.current_scale().fractional_scale();
-            let output_transform = output.current_transform();
-            let output_size = output
-                .current_mode()
-                .map(|mode| {
-                    output_transform
-                        .transform_size(mode.size)
-                        .to_f64()
-                        .to_logical(output_scale)
-                })
-                .unwrap_or_default();
-
-            let max_elements_per_row = 4;
-            let elements_per_row = usize::min(elements_on_space, max_elements_per_row);
-            let rows = f64::ceil(elements_on_space as f64 / elements_per_row as f64);
-
-            let preview_size = Size::from((
-                f64::round(output_size.w / elements_per_row as f64) as i32 - preview_padding * 2,
-                f64::round(output_size.h / rows) as i32 - preview_padding * 2,
-            ));
-
-            output_render_elements.extend(space.elements_for_output(output).enumerate().flat_map(
-                |(element_index, window)| {
-                    let column = element_index % elements_per_row;
-                    let row = element_index / elements_per_row;
-                    let preview_location = Point::from((
-                        preview_padding + (preview_padding + preview_size.w) * column as i32,
-                        preview_padding + (preview_padding + preview_size.h) * row as i32,
-                    ));
-                    let constrain = Rectangle::from_loc_and_size(preview_location, preview_size);
-                    constrain_space_element(
-                        renderer,
-                        window,
-                        preview_location,
-                        output_scale,
-                        constrain,
-                        constrain_behavior,
-                    )
-                },
-            ));
+            output_render_elements.extend(space_preview_elements(renderer, space, output));
         }
 
         desktop::space::render_output(
