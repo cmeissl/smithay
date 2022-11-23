@@ -1,13 +1,15 @@
 #[cfg(feature = "backend_session")]
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::io;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::path::PathBuf;
-use std::sync::{atomic::AtomicBool, Arc};
+use std::sync::Weak;
+use std::sync::{atomic::AtomicBool, Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
 use calloop::{EventSource, Interest, Poll, PostAction, Readiness, Token, TokenFactory};
-use drm::control::{connector, crtc, Device as ControlDevice, Event, Mode, ResourceHandles};
+use drm::control::{connector, crtc, plane, Device as ControlDevice, Event, Mode, ResourceHandles};
 use drm::{ClientCapability, Device as BasicDevice, DriverCapability};
 use nix::libc::dev_t;
 use nix::sys::stat::fstat;
@@ -23,6 +25,89 @@ use legacy::LegacyDrmDevice;
 
 use slog::{error, info, o, trace, warn};
 
+#[derive(Debug)]
+struct PlaneClaimInner {
+    plane: drm::control::plane::Handle,
+    crtc: drm::control::crtc::Handle,
+    storage: PlaneClaimStorage,
+}
+
+impl Drop for PlaneClaimInner {
+    fn drop(&mut self) {
+        self.storage.remove(self.plane);
+    }
+}
+
+#[derive(Debug, Clone)]
+struct PlaneClaimWeak(Weak<PlaneClaimInner>);
+
+impl PlaneClaimWeak {
+    fn upgrade(&self) -> Option<PlaneClaim> {
+        self.0.upgrade().map(|claim| PlaneClaim { claim })
+    }
+}
+
+/// A claim of a plane
+#[derive(Debug, Clone)]
+pub struct PlaneClaim {
+    claim: Arc<PlaneClaimInner>,
+}
+
+impl PlaneClaim {
+    /// The plane the claim was taken for
+    pub fn plane(&self) -> drm::control::plane::Handle {
+        self.claim.plane
+    }
+
+    /// The crct the claim was taken for
+    pub fn crtc(&self) -> drm::control::crtc::Handle {
+        self.claim.crtc
+    }
+}
+
+impl PlaneClaim {
+    fn downgrade(&self) -> PlaneClaimWeak {
+        PlaneClaimWeak(Arc::downgrade(&self.claim))
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct PlaneClaimStorage {
+    claimed_planes: Arc<Mutex<HashMap<drm::control::plane::Handle, PlaneClaimWeak>>>,
+}
+
+impl PlaneClaimStorage {
+    pub fn claim(
+        &self,
+        plane: drm::control::plane::Handle,
+        crtc: drm::control::crtc::Handle,
+    ) -> Option<PlaneClaim> {
+        let mut guard = self.claimed_planes.lock().unwrap();
+        if let Some(claim) = guard.get(&plane).and_then(|claim| claim.upgrade()) {
+            if claim.crtc() == crtc {
+                Some(claim)
+            } else {
+                None
+            }
+        } else {
+            let claim = PlaneClaim {
+                claim: Arc::new(PlaneClaimInner {
+                    plane,
+                    crtc,
+                    storage: self.clone(),
+                }),
+            };
+            guard.insert(plane, claim.downgrade());
+            Some(claim)
+        }
+    }
+
+    fn remove(&self, plane: drm::control::plane::Handle) {
+        let mut guard = self.claimed_planes.lock().unwrap();
+        guard.remove(&plane);
+    }
+}
+
 /// An open drm device
 #[derive(Debug)]
 pub struct DrmDevice<A: AsRawFd + 'static> {
@@ -36,6 +121,7 @@ pub struct DrmDevice<A: AsRawFd + 'static> {
     resources: ResourceHandles,
     pub(super) logger: ::slog::Logger,
     token: Option<Token>,
+    plane_claim_storage: PlaneClaimStorage,
 }
 
 impl<A: AsRawFd + 'static> AsRawFd for DrmDevice<A> {
@@ -176,6 +262,7 @@ impl<A: AsRawFd + 'static> DrmDevice<A> {
             resources,
             logger: log,
             token: None,
+            plane_claim_storage: Default::default(),
         })
     }
 
@@ -221,6 +308,13 @@ impl<A: AsRawFd + 'static> DrmDevice<A> {
     /// Returns a set of available planes for a given crtc
     pub fn planes(&self, crtc: &crtc::Handle) -> Result<Planes, Error> {
         planes(self, crtc, self.has_universal_planes)
+    }
+
+    /// Claim a plane so that it won't be used by a different crtc
+    ///  
+    /// Returns `None` if the plane could not be claimed
+    pub fn claim_plane(&self, plane: plane::Handle, crtc: crtc::Handle) -> Option<PlaneClaim> {
+        self.plane_claim_storage.claim(plane, crtc)
     }
 
     /// Returns the size of the hardware cursor
@@ -307,6 +401,7 @@ impl<A: AsRawFd + 'static> DrmDevice<A> {
             has_universal_planes: self.has_universal_planes,
             #[cfg(feature = "backend_session")]
             links: RefCell::new(Vec::new()),
+            plane_claim_storage: self.plane_claim_storage.clone(),
         })
     }
 

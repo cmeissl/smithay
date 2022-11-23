@@ -15,7 +15,11 @@ pub(super) mod atomic;
 pub(super) mod gbm;
 pub(super) mod legacy;
 
-use super::{device::DevPath, error::Error, plane_type, planes, PlaneType, Planes};
+use super::{
+    device::{DevPath, PlaneClaimStorage},
+    error::Error,
+    plane_type, planes, PlaneClaim, PlaneType, Planes,
+};
 use crate::backend::allocator::{Format, Fourcc, Modifier};
 use crate::utils::{Buffer, Physical, Rectangle, Transform};
 use atomic::AtomicDrmSurface;
@@ -35,6 +39,7 @@ pub struct DrmSurface<A: AsRawFd + 'static> {
     pub(super) has_universal_planes: bool,
     #[cfg(feature = "backend_session")]
     pub(super) links: RefCell<Vec<crate::utils::signaling::SignalToken>>,
+    pub(super) plane_claim_storage: PlaneClaimStorage,
 }
 
 #[derive(Debug)]
@@ -527,6 +532,13 @@ impl<A: AsRawFd + 'static> DrmSurface<A> {
         };
 
         planes(self, &self.crtc, has_universal_planes)
+    }
+
+    /// Claim a plane so that it won't be used by a different crtc
+    ///  
+    /// Returns `None` if the plane could not be claimed
+    pub fn claim_plane(&self, plane: plane::Handle) -> Option<PlaneClaim> {
+        self.plane_claim_storage.claim(plane, self.crtc)
     }
 
     /// Re-evaluates the current state of the crtc.
