@@ -13,8 +13,8 @@ use crate::{
         allocator::{dmabuf::Dmabuf, Format},
         egl::{EGLContext, EGLSurface},
         renderer::{
-            gles2::*, Bind, ExportDma, ExportMem, ImportDma, ImportMem, Offscreen, Renderer, TextureFilter,
-            Unbind,
+            gles2::*, Bind, DebugFlags, ExportDma, ExportMem, ImportDma, ImportMem, Offscreen, Renderer,
+            TextureFilter, Unbind,
         },
     },
     utils::{Buffer as BufferCoord, Physical, Rectangle, Size, Transform},
@@ -160,6 +160,13 @@ impl Renderer for GlowRenderer {
     }
     fn upscale_filter(&mut self, filter: TextureFilter) -> Result<(), Self::Error> {
         self.gl.upscale_filter(filter)
+    }
+
+    fn set_debug_flags(&mut self, flags: DebugFlags) {
+        self.gl.set_debug_flags(flags)
+    }
+    fn debug_flags(&self) -> DebugFlags {
+        self.gl.debug_flags()
     }
 
     fn render(

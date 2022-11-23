@@ -24,8 +24,8 @@ mod shaders;
 mod version;
 
 use super::{
-    Bind, ExportDma, ExportMem, Frame, ImportDma, ImportMem, Offscreen, Renderer, Texture, TextureFilter,
-    TextureMapping, Unbind,
+    Bind, DebugFlags, ExportDma, ExportMem, Frame, ImportDma, ImportMem, Offscreen, Renderer, Texture,
+    TextureFilter, TextureMapping, Unbind,
 };
 use crate::backend::allocator::{
     dmabuf::{Dmabuf, WeakDmabuf},
@@ -63,6 +63,7 @@ struct Gles2TexProgram {
     uniform_tex_matrix: ffi::types::GLint,
     uniform_matrix: ffi::types::GLint,
     uniform_alpha: ffi::types::GLint,
+    uniform_tint: ffi::types::GLint,
     attrib_vert: ffi::types::GLint,
     attrib_vert_position: ffi::types::GLint,
 }
@@ -288,6 +289,7 @@ pub struct Gles2Renderer {
     supports_instancing: bool,
     logger_ptr: Option<*mut ::slog::Logger>,
     pub(crate) logger: ::slog::Logger,
+    debug_flags: DebugFlags,
     _not_send: *mut (),
 }
 
@@ -523,6 +525,7 @@ unsafe fn texture_program(gl: &ffi::Gles2, frag: &'static str) -> Result<Gles2Te
     let matrix = CStr::from_bytes_with_nul(b"matrix\0").expect("NULL terminated");
     let tex_matrix = CStr::from_bytes_with_nul(b"tex_matrix\0").expect("NULL terminated");
     let alpha = CStr::from_bytes_with_nul(b"alpha\0").expect("NULL terminated");
+    let tint = CStr::from_bytes_with_nul(b"tint\0").expect("NULL terminated");
 
     Ok(Gles2TexProgram {
         program,
@@ -530,6 +533,7 @@ unsafe fn texture_program(gl: &ffi::Gles2, frag: &'static str) -> Result<Gles2Te
         uniform_matrix: gl.GetUniformLocation(program, matrix.as_ptr() as *const ffi::types::GLchar),
         uniform_tex_matrix: gl.GetUniformLocation(program, tex_matrix.as_ptr() as *const ffi::types::GLchar),
         uniform_alpha: gl.GetUniformLocation(program, alpha.as_ptr() as *const ffi::types::GLchar),
+        uniform_tint: gl.GetUniformLocation(program, tint.as_ptr() as *const ffi::types::GLchar),
         attrib_vert: gl.GetAttribLocation(program, vert.as_ptr() as *const ffi::types::GLchar),
         attrib_vert_position: gl
             .GetAttribLocation(program, vert_position.as_ptr() as *const ffi::types::GLchar),
@@ -690,6 +694,7 @@ impl Gles2Renderer {
             supports_instancing,
             logger_ptr,
             logger: log,
+            debug_flags: DebugFlags::empty(),
             _not_send: std::ptr::null_mut(),
         };
         renderer.egl.unbind()?;
@@ -1772,6 +1777,14 @@ impl Renderer for Gles2Renderer {
             finished: AtomicBool::new(false),
         })
     }
+
+    fn set_debug_flags(&mut self, flags: DebugFlags) {
+        self.debug_flags = flags;
+    }
+
+    fn debug_flags(&self) -> DebugFlags {
+        self.debug_flags
+    }
 }
 
 /// Vertices for instanced rendering.
@@ -2146,6 +2159,12 @@ impl<'frame> Gles2Frame<'frame> {
                 self.renderer.tex_programs[tex.0.texture_kind].uniform_alpha,
                 alpha,
             );
+            let tint = if self.renderer.debug_flags.contains(DebugFlags::TINT) {
+                1.0f32
+            } else {
+                0.0f32
+            };
+            gl.Uniform1f(self.renderer.tex_programs[tex.0.texture_kind].uniform_tint, tint);
 
             gl.EnableVertexAttribArray(self.renderer.tex_programs[tex.0.texture_kind].attrib_vert as u32);
             gl.BindBuffer(ffi::ARRAY_BUFFER, self.renderer.vbos[0]);
