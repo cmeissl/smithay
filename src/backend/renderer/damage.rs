@@ -377,13 +377,7 @@ impl DamageTrackedRenderer {
                     continue;
                 }
 
-                element.draw(
-                    &mut frame,
-                    element.location(output_scale),
-                    output_scale,
-                    &element_damage,
-                    &log,
-                )?;
+                element.draw(&mut frame, element.src(), element_geometry, &element_damage, &log)?;
             }
 
             Result::<(), R::Error>::Ok(())

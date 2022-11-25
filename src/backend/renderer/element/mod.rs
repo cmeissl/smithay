@@ -343,8 +343,8 @@ pub trait RenderElement<R: Renderer>: Element {
     fn draw<'a>(
         &self,
         frame: &mut <R as Renderer>::Frame<'a>,
-        location: Point<i32, Physical>,
-        scale: Scale<f64>,
+        src: Rectangle<f64, BufferCoords>,
+        dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
         log: &slog::Logger,
     ) -> Result<(), R::Error>;
@@ -425,12 +425,12 @@ where
     fn draw<'a>(
         &self,
         frame: &mut <R as Renderer>::Frame<'a>,
-        location: Point<i32, Physical>,
-        scale: Scale<f64>,
+        src: Rectangle<f64, BufferCoords>,
+        dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
         log: &slog::Logger,
     ) -> Result<(), R::Error> {
-        (*self).draw(frame, location, scale, damage, log)
+        (*self).draw(frame, src, dst, damage, log)
     }
 }
 
@@ -683,8 +683,8 @@ macro_rules! render_elements_internal {
         fn draw<'frame>(
             &self,
             frame: &mut <$renderer as $crate::backend::renderer::Renderer>::Frame<'frame>,
-            location: $crate::utils::Point<i32, $crate::utils::Physical>,
-            scale: $crate::utils::Scale<f64>,
+            src: $crate::utils::Rectangle<f64, $crate::utils::Buffer>,
+            dst: $crate::utils::Rectangle<i32, $crate::utils::Physical>,
             damage: &[$crate::utils::Rectangle<i32, $crate::utils::Physical>],
             log: &slog::Logger,
         ) -> Result<(), <$renderer as $crate::backend::renderer::Renderer>::Error>
@@ -703,7 +703,7 @@ macro_rules! render_elements_internal {
                     $(
                         #[$meta]
                     )*
-                    Self::$body(x) => $crate::render_elements_internal!(@call $renderer $(as $other_renderer)?; draw; x, frame, location, scale, damage, log)
+                    Self::$body(x) => $crate::render_elements_internal!(@call $renderer $(as $other_renderer)?; draw; x, frame, src, dst, damage, log)
                 ),*,
                 Self::_GenericCatcher(_) => unreachable!(),
             }
@@ -727,8 +727,8 @@ macro_rules! render_elements_internal {
         fn draw<'frame>(
             &self,
             frame: &mut <$renderer as $crate::backend::renderer::Renderer>::Frame<'frame>,
-            location: $crate::utils::Point<i32, $crate::utils::Physical>,
-            scale: $crate::utils::Scale<f64>,
+            src: $crate::utils::Rectangle<f64, $crate::utils::Buffer>,
+            dst: $crate::utils::Rectangle<i32, $crate::utils::Physical>,
             damage: &[$crate::utils::Rectangle<i32, $crate::utils::Physical>],
             log: &slog::Logger,
         ) -> Result<(), <$renderer as $crate::backend::renderer::Renderer>::Error>
@@ -739,7 +739,7 @@ macro_rules! render_elements_internal {
                     $(
                         #[$meta]
                     )*
-                    Self::$body(x) => $crate::render_elements_internal!(@call $renderer $(as $other_renderer)?; draw; x, frame, location, scale, damage, log)
+                    Self::$body(x) => $crate::render_elements_internal!(@call $renderer $(as $other_renderer)?; draw; x, frame, src, dst, damage, log)
                 ),*,
                 Self::_GenericCatcher(_) => unreachable!(),
             }
@@ -1060,8 +1060,8 @@ macro_rules! render_elements_internal {
 /// #     fn draw(
 /// #         &self,
 /// #         _frame: &mut <R as Renderer>::Frame<'_>,
-/// #         _location: Point<i32, Physical>,
-/// #         _scale: Scale<f64>,
+/// #         _src: Rectangle<f64, Buffer>,
+/// #         _dst: Rectangle<i32, Physical>,
 /// #         _damage: &[Rectangle<i32, Physical>],
 /// #         _log: &slog::Logger,
 /// #     ) -> Result<(), <R as Renderer>::Error> {
@@ -1091,8 +1091,8 @@ macro_rules! render_elements_internal {
 /// #     fn draw<'a>(
 /// #         &self,
 /// #         _frame: &mut <R as Renderer>::Frame<'a>,
-/// #         _location: Point<i32, Physical>,
-/// #         _scale: Scale<f64>,
+/// #         _src: Rectangle<f64, Buffer>,
+/// #         _dst: Rectangle<i32, Physical>,
 /// #         _damage: &[Rectangle<i32, Physical>],
 /// #         _log: &slog::Logger,
 /// #     ) -> Result<(), <R as Renderer>::Error> {
@@ -1361,12 +1361,12 @@ where
     fn draw<'a>(
         &self,
         frame: &mut <R as Renderer>::Frame<'a>,
-        location: Point<i32, Physical>,
-        scale: Scale<f64>,
+        src: Rectangle<f64, BufferCoords>,
+        dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
         log: &slog::Logger,
     ) -> Result<(), <R as Renderer>::Error> {
-        self.0.draw(frame, location, scale, damage, log)
+        self.0.draw(frame, src, dst, damage, log)
     }
 
     fn underlying_storage(&self, renderer: &R) -> Option<UnderlyingStorage<'_, R>> {
