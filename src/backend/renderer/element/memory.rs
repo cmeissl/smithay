@@ -626,6 +626,6 @@ where
             return Ok(());
         };
 
-        frame.render_texture_from_to(texture, src, dst, damage, transform, self.alpha)
+        frame.render_texture_from_to(texture, src, dst, damage, transform, self.alpha, true)
     }
 }

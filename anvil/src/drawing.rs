@@ -225,6 +225,7 @@ where
                 &damage,
                 Transform::Normal,
                 1.0,
+                true,
             )?;
             offset += Point::from((24.0, 0.0)).to_physical(scale);
         }

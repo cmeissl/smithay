@@ -212,11 +212,17 @@ impl<'frame> Frame for GlowFrame<'frame> {
         damage: &[Rectangle<i32, Physical>],
         src_transform: Transform,
         alpha: f32,
+        blend: bool,
     ) -> Result<(), Self::Error> {
-        self.frame
-            .as_mut()
-            .unwrap()
-            .render_texture_from_to(texture, src, dst, damage, src_transform, alpha)
+        self.frame.as_mut().unwrap().render_texture_from_to(
+            texture,
+            src,
+            dst,
+            damage,
+            src_transform,
+            alpha,
+            blend,
+        )
     }
 
     fn transformation(&self) -> Transform {
@@ -232,6 +238,7 @@ impl<'frame> Frame for GlowFrame<'frame> {
         src_transform: Transform,
         damage: &[Rectangle<i32, Physical>],
         alpha: f32,
+        blend: bool,
     ) -> Result<(), Self::Error> {
         self.frame.as_mut().unwrap().render_texture_at(
             texture,
@@ -241,6 +248,7 @@ impl<'frame> Frame for GlowFrame<'frame> {
             src_transform,
             damage,
             alpha,
+            blend,
         )
     }
 
