@@ -478,7 +478,15 @@ where
                 let data = data.borrow();
 
                 if let Some(texture) = data.texture::<R>(frame.id()) {
-                    frame.render_texture_from_to(texture, src, dst, damage, data.buffer_transform, 1.0f32)?;
+                    frame.render_texture_from_to(
+                        texture,
+                        src,
+                        dst,
+                        damage,
+                        data.buffer_transform,
+                        1.0f32,
+                        true,
+                    )?;
                 } else {
                     warn!(log, "trying to render texture from different renderer");
                 }

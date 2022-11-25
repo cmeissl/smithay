@@ -814,7 +814,7 @@ where
             return Ok(());
         }
 
-        frame.render_texture_from_to(&self.texture, src, dst, damage, self.transform, self.alpha)
+        frame.render_texture_from_to(&self.texture, src, dst, damage, self.transform, self.alpha, true)
     }
 
     fn underlying_storage(&self, _renderer: &R) -> Option<UnderlyingStorage<'_, R>> {
