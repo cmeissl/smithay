@@ -336,6 +336,7 @@ pub fn run_x11(log: Logger) {
                 &mut backend_data.renderer,
                 &mut backend_data.damage_tracked_renderer,
                 age.into(),
+                state.show_window_preview,
                 &log,
             );
 
