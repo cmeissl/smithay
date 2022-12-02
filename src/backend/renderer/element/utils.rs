@@ -2,7 +2,7 @@
 
 use crate::{
     backend::renderer::Renderer,
-    utils::{Buffer, Physical, Point, Rectangle, Scale, Size},
+    utils::{Buffer, Physical, Point, Rectangle, Scale},
 };
 
 use super::{AsRenderElements, Element, RenderElement};
@@ -65,12 +65,7 @@ impl<E: Element> Element for RescaleRenderElement<E> {
         self.element
             .damage_since(scale, commit)
             .into_iter()
-            .map(|mut rect| {
-                rect.loc -= self.origin;
-                rect = rect.to_f64().upscale(self.scale).to_i32_up();
-                rect.loc += self.origin;
-                rect
-            })
+            .map(|rect| rect.to_f64().upscale(self.scale).to_i32_up())
             .collect::<Vec<_>>()
     }
 
@@ -81,12 +76,7 @@ impl<E: Element> Element for RescaleRenderElement<E> {
         self.element
             .opaque_regions(scale * self.scale)
             .into_iter()
-            .map(|mut rect| {
-                rect.loc -= self.origin;
-                rect = rect.to_f64().upscale(self.scale).to_i32_round();
-                rect.loc += self.origin;
-                rect
-            })
+            .map(|rect| rect.to_f64().upscale(self.scale).to_i32_round())
             .collect::<Vec<_>>()
     }
 }
@@ -388,7 +378,7 @@ pub fn constrain_as_render_elements<R, E, C>(
     element: &E,
     renderer: &mut R,
     location: impl Into<Point<i32, Physical>>,
-    size: impl Into<Size<i32, Physical>>,
+    constrain: Rectangle<i32, Physical>,
     reference: Rectangle<i32, Physical>,
     behavior: ConstrainScaleBehavior,
     align: ConstrainAlign,
@@ -407,14 +397,23 @@ where
     let output_scale = output_scale.into();
     let elements: Vec<<E as AsRenderElements<R>>::RenderElement> =
         AsRenderElements::<R>::render_elements(element, renderer, location, output_scale);
-    constrain_render_elements(elements, location, size, reference, behavior, align, output_scale).map(C::from)
+    constrain_render_elements(
+        elements,
+        location,
+        constrain,
+        reference,
+        behavior,
+        align,
+        output_scale,
+    )
+    .map(C::from)
 }
 
 /// Constrain render elements on a specific location with a specific size
 pub fn constrain_render_elements<E>(
     elements: impl IntoIterator<Item = E>,
     location: impl Into<Point<i32, Physical>>,
-    size: impl Into<Size<i32, Physical>>,
+    constrain: Rectangle<i32, Physical>,
     reference: Rectangle<i32, Physical>,
     behavior: ConstrainScaleBehavior,
     align: ConstrainAlign,
@@ -424,25 +423,24 @@ where
     E: Element,
 {
     let location = location.into();
-    let size = size.into();
     let output_scale = output_scale.into();
 
     let element_scale = match behavior {
         ConstrainScaleBehavior::Fit => {
             let reference = reference.to_f64();
-            let size = size.to_f64();
+            let size = constrain.size.to_f64();
             let element_scale: Scale<f64> = size / reference.size;
             Scale::from(f64::min(element_scale.x, element_scale.y))
         }
         ConstrainScaleBehavior::Zoom => {
             let reference = reference.to_f64();
-            let size = size.to_f64();
+            let size = constrain.size.to_f64();
             let element_scale: Scale<f64> = size / reference.size;
             Scale::from(f64::max(element_scale.x, element_scale.y))
         }
         ConstrainScaleBehavior::Stretch => {
             let reference = reference.to_f64();
-            let size = size.to_f64();
+            let size = constrain.size.to_f64();
             size / reference.size
         }
         ConstrainScaleBehavior::CutOff => Scale::from(1.0),
@@ -452,17 +450,17 @@ where
 
     // Calculate the align offset
     let top_offset: f64 = if align.contains(ConstrainAlign::TOP | ConstrainAlign::BOTTOM) {
-        (size.h as f64 - scaled_reference.size.h) / 2f64
+        (constrain.size.h as f64 - scaled_reference.size.h) / 2f64
     } else if align.contains(ConstrainAlign::BOTTOM) {
-        size.h as f64 - scaled_reference.size.h
+        constrain.size.h as f64 - scaled_reference.size.h
     } else {
         0f64
     };
 
     let left_offset: f64 = if align.contains(ConstrainAlign::LEFT | ConstrainAlign::RIGHT) {
-        (size.w as f64 - scaled_reference.size.w) / 2f64
+        (constrain.size.w as f64 - scaled_reference.size.w) / 2f64
     } else if align.contains(ConstrainAlign::RIGHT) {
-        size.w as f64 - scaled_reference.size.w
+        constrain.size.w as f64 - scaled_reference.size.w
     } else {
         0f64
     };
@@ -471,16 +469,16 @@ where
 
     // We need to offset the elements by the reference loc or otherwise
     // the element could be positioned outside of our constrain rect.
-    let reference_offset = Point::from((-scaled_reference.loc.x, -scaled_reference.loc.y));
+    let reference_offset =
+        reference.loc.to_f64() - Point::from((scaled_reference.loc.x, scaled_reference.loc.y));
 
     // Final offset
     let offset = (reference_offset + align_offset).to_i32_round();
-
-    let crop_rect = Rectangle::from_loc_and_size(location, size);
+    //let offset = align_offset.to_i32_round();
 
     elements
         .into_iter()
         .map(move |e| RescaleRenderElement::from_element(e, location, element_scale))
         .map(move |e| RelocateRenderElement::from_element(e, offset, Relocate::Relative))
-        .filter_map(move |e| CropRenderElement::from_element(e, output_scale, crop_rect))
+        .filter_map(move |e| CropRenderElement::from_element(e, output_scale, constrain))
 }

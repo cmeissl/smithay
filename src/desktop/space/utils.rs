@@ -9,7 +9,7 @@ use crate::{
         },
         Renderer,
     },
-    utils::{Logical, Point, Scale, Size},
+    utils::{Logical, Point, Rectangle, Scale},
 };
 
 use super::SpaceElement;
@@ -40,7 +40,7 @@ pub fn constrain_space_element<R, E, C>(
     element: &E,
     location: impl Into<Point<i32, Logical>>,
     scale: impl Into<Scale<f64>>,
-    size: impl Into<Size<i32, Logical>>,
+    constrain: Rectangle<i32, Logical>,
     behavior: ConstrainBehavior,
 ) -> impl Iterator<Item = C>
 where
@@ -54,7 +54,6 @@ where
 {
     let location = location.into();
     let scale = scale.into();
-    let constrain_size = size.into();
 
     let scale_reference = match behavior.reference {
         ConstrainReference::BoundingBox => element.bbox(),
@@ -64,8 +63,8 @@ where
     constrain_as_render_elements(
         element,
         renderer,
-        location.to_physical_precise_round(scale),
-        constrain_size.to_physical_precise_round(scale),
+        (location - scale_reference.loc).to_physical_precise_round(scale),
+        constrain.to_physical_precise_round(scale),
         scale_reference.to_physical_precise_round(scale),
         behavior.behavior,
         behavior.align,
