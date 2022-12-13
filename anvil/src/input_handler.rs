@@ -539,6 +539,17 @@ impl AnvilState<UdevData> {
                         self.backend_data.reset_buffers(&output);
                     }
                 }
+                KeyAction::ResetBuffers => {
+                    let pos = self.pointer_location.to_i32_round();
+                    let output = self
+                        .space
+                        .outputs()
+                        .find(|o| self.space.output_geometry(o).unwrap().contains(pos))
+                        .cloned();
+                    if let Some(output) = output {
+                        self.backend_data.reset_buffers(&output);
+                    }
+                }
 
                 action => match action {
                     KeyAction::None | KeyAction::Quit | KeyAction::Run(_) | KeyAction::TogglePreview => {
@@ -807,6 +818,7 @@ enum KeyAction {
     ScaleUp,
     ScaleDown,
     TogglePreview,
+    ResetBuffers,
     /// Do nothing more
     None,
 }
@@ -834,6 +846,8 @@ fn process_keyboard_shortcut(modifiers: ModifiersState, keysym: Keysym) -> Optio
         Some(KeyAction::ScaleUp)
     } else if modifiers.logo && modifiers.shift && keysym == xkb::KEY_W {
         Some(KeyAction::TogglePreview)
+    } else if modifiers.logo && modifiers.shift && keysym == xkb::KEY_R {
+        Some(KeyAction::ResetBuffers)
     } else {
         None
     }

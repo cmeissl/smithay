@@ -143,6 +143,7 @@ impl Backend for UdevData {
             if let Some(gpu) = self.backends.get(&id.device_id) {
                 let surfaces = gpu.surfaces.borrow();
                 if let Some(surface) = surfaces.get(&id.crtc) {
+                    slog::info!(self.logger, "resetting buffers");
                     surface.borrow_mut().surface.reset_buffers();
                 }
             }
