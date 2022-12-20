@@ -92,11 +92,20 @@ use drm::control::{crtc, plane, Device as ControlDevice, PlaneType};
 #[derive(Debug)]
 pub struct Planes {
     /// The primary plane of the crtc (automatically selected for [DrmDevice::create_surface])
-    pub primary: plane::Handle,
+    pub primary: PlaneInfo,
     /// The cursor plane of the crtc, if available
-    pub cursor: Option<plane::Handle>,
+    pub cursor: Option<PlaneInfo>,
     /// Overlay planes supported by the crtc, if available
-    pub overlay: Vec<plane::Handle>,
+    pub overlay: Vec<PlaneInfo>,
+}
+
+/// Info about a single plane
+#[derive(Debug)]
+pub struct PlaneInfo {
+    /// Handle of the plane
+    pub handle: plane::Handle,
+    /// z-position of the plane if available
+    pub zpos: Option<i32>,
 }
 
 fn planes(
@@ -128,15 +137,17 @@ fn planes(
         })?;
         let filter = info.possible_crtcs();
         if resources.filter_crtcs(filter).contains(crtc) {
+            let zpos = plane_zpos(dev, plane).ok().flatten();
+            let plane_info = PlaneInfo { handle: plane, zpos };
             match plane_type(dev, plane)? {
                 PlaneType::Primary => {
-                    primary = Some(plane);
+                    primary = Some(plane_info);
                 }
                 PlaneType::Cursor => {
-                    cursor = Some(plane);
+                    cursor = Some(plane_info);
                 }
                 PlaneType::Overlay => {
-                    overlay.push(plane);
+                    overlay.push(plane_info);
                 }
             };
         }
@@ -171,4 +182,29 @@ fn plane_type(dev: &impl ControlDevice, plane: plane::Handle) -> Result<PlaneTyp
         }
     }
     unreachable!()
+}
+
+fn plane_zpos(dev: &impl drm::control::Device, plane: plane::Handle) -> Result<Option<i32>, DrmError> {
+    let props = dev.get_properties(plane).map_err(|source| DrmError::Access {
+        errmsg: "Failed to get properties of plane",
+        dev: dev.dev_path(),
+        source,
+    })?;
+    let (ids, vals) = props.as_props_and_values();
+    for (&id, &val) in ids.iter().zip(vals.iter()) {
+        let info = dev.get_property(id).map_err(|source| DrmError::Access {
+            errmsg: "Failed to get property info",
+            dev: dev.dev_path(),
+            source,
+        })?;
+        if info.name().to_str().map(|x| x == "zpos").unwrap_or(false) {
+            let plane_zpos = match info.value_type().convert_value(val) {
+                drm::control::property::Value::UnsignedRange(u) => Some(u as i32),
+                drm::control::property::Value::SignedRange(i) => Some(i as i32),
+                _ => None,
+            };
+            return Ok(plane_zpos);
+        }
+    }
+    Ok(None)
 }

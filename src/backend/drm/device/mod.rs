@@ -351,14 +351,14 @@ impl<A: AsRawFd + 'static> DrmDevice<A> {
         }
 
         let plane = planes(self, &crtc, self.has_universal_planes)?.primary;
-        let info = self.get_plane(plane).map_err(|source| Error::Access {
+        let info = self.get_plane(plane.handle).map_err(|source| Error::Access {
             errmsg: "Failed to get plane info",
             dev: self.dev_path(),
             source,
         })?;
         let filter = info.possible_crtcs();
         if !self.resources.filter_crtcs(filter).contains(&crtc) {
-            return Err(Error::PlaneNotCompatible(crtc, plane));
+            return Err(Error::PlaneNotCompatible(crtc, plane.handle));
         }
 
         let active = match &*self.internal {
@@ -376,7 +376,7 @@ impl<A: AsRawFd + 'static> DrmDevice<A> {
                 self.internal.clone(),
                 active,
                 crtc,
-                plane,
+                plane.handle,
                 mapping,
                 mode,
                 connectors,
@@ -396,7 +396,7 @@ impl<A: AsRawFd + 'static> DrmDevice<A> {
         Ok(DrmSurface {
             dev_id: self.dev_id,
             crtc,
-            primary: plane,
+            primary: plane.handle,
             internal: Arc::new(internal),
             has_universal_planes: self.has_universal_planes,
             #[cfg(feature = "backend_session")]
