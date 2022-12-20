@@ -71,6 +71,7 @@ use smithay::{
                 encoder::Info as EncoderInfo,
                 Device as ControlDevice,
             },
+            Device,
         },
         gbm::Device as GbmDevice,
         input::Libinput,
@@ -549,10 +550,37 @@ fn scan_connectors(
             #[cfg(feature = "debug")]
             let fps_element = FpsElement::new(fps_texture.clone());
 
+            let driver = match device.get_driver() {
+                Ok(driver) => driver,
+                Err(err) => {
+                    warn!(logger, "Failed to query drm driver: {}", err);
+                    continue;
+                }
+            };
+
+            let mut planes = match surface.planes() {
+                Ok(planes) => planes,
+                Err(err) => {
+                    warn!(logger, "Failed to query surface planes: {}", err);
+                    continue;
+                }
+            };
+
+            // Using an overlay plane on a nvidia card breaks
+            if driver.name().to_string_lossy().to_lowercase().contains("nvidia")
+                || driver
+                    .description()
+                    .to_string_lossy()
+                    .to_lowercase()
+                    .contains("nvidia")
+            {
+                planes.overlay = vec![];
+            }
+
             let mut compositor = match DrmCompositor::new(
                 &output,
                 surface,
-                None,
+                Some(planes),
                 gbm.clone(),
                 gbm.clone(),
                 formats.clone(),
