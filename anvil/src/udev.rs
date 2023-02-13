@@ -42,11 +42,11 @@ use smithay::{
             element::{
                 texture::TextureBuffer,
                 utils::{CropRenderElement, RelocateRenderElement, RescaleRenderElement},
-                AsRenderElements,
+                AsRenderElements, RenderElement,
             },
             gles2::{Gles2Renderbuffer, Gles2Renderer},
             multigpu::{egl::EglGlesBackend, GpuManager, MultiRenderer, MultiTexture},
-            DebugFlags, ImportAll, ImportMem,
+            DebugFlags, ImportAll, ImportMem, Renderer,
         },
         session::{libseat::LibSeatSession, Event as SessionEvent, Session},
         udev::{all_gpus, primary_gpu, UdevBackend, UdevEvent},
@@ -182,6 +182,21 @@ smithay::backend::renderer::element::render_elements! {
     Space=SpaceRenderElements<R, E>,
     Custom=CustomRenderElements<R>,
     Preview=CropRenderElement<RelocateRenderElement<RescaleRenderElement<WindowRenderElement<R>>>>,
+}
+
+impl<R: Renderer + ImportAll + ImportMem + std::fmt::Debug, E: RenderElement<R> + std::fmt::Debug>
+    std::fmt::Debug for OutputRenderElements<R, E>
+where
+    <R as Renderer>::TextureId: std::fmt::Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Space(arg0) => f.debug_tuple("Space").field(arg0).finish(),
+            Self::Custom(arg0) => f.debug_tuple("Custom").field(arg0).finish(),
+            Self::Preview(arg0) => f.debug_tuple("Preview").field(arg0).finish(),
+            Self::_GenericCatcher(arg0) => f.debug_tuple("_GenericCatcher").field(arg0).finish(),
+        }
+    }
 }
 
 pub fn run_udev(log: Logger) {

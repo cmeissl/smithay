@@ -40,6 +40,22 @@ smithay::backend::renderer::element::render_elements! {
     Fps=FpsElement<<R as Renderer>::TextureId>,
 }
 
+impl<R: Renderer + std::fmt::Debug> std::fmt::Debug for CustomRenderElements<R>
+where
+    <R as Renderer>::TextureId: std::fmt::Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Pointer(arg0) => f.debug_tuple("Pointer").field(arg0).finish(),
+            Self::Surface(arg0) => f.debug_tuple("Surface").field(arg0).finish(),
+            Self::Window(arg0) => f.debug_tuple("Window").field(arg0).finish(),
+            #[cfg(feature = "debug")]
+            Self::Fps(arg0) => f.debug_tuple("Fps").field(arg0).finish(),
+            Self::_GenericCatcher(arg0) => f.debug_tuple("_GenericCatcher").field(arg0).finish(),
+        }
+    }
+}
+
 smithay::backend::renderer::element::render_elements! {
     pub OutputRenderElements<'a, R> where
         R: ImportAll + ImportMem;
