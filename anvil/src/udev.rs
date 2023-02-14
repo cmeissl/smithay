@@ -46,7 +46,7 @@ use smithay::{
             },
             gles2::{Gles2Renderbuffer, Gles2Renderer},
             multigpu::{egl::EglGlesBackend, GpuManager, MultiRenderer, MultiTexture},
-            DebugFlags, ImportAll, ImportMem, Renderer,
+            Bind, DebugFlags, ExportMem, ImportAll, ImportMem, Offscreen, Renderer,
         },
         session::{libseat::LibSeatSession, Event as SessionEvent, Session},
         udev::{all_gpus, primary_gpu, UdevBackend, UdevEvent},
@@ -79,7 +79,7 @@ use smithay::{
         wayland_protocols::wp::presentation_time::server::wp_presentation_feedback,
         wayland_server::{backend::GlobalId, protocol::wl_surface, Display, DisplayHandle},
     },
-    utils::{Clock, DeviceFd, IsAlive, Logical, Monotonic, Point, Scale, Transform},
+    utils::{Clock, DeviceFd, IsAlive, Logical, Monotonic, Point, Rectangle, Scale, Transform},
     wayland::{
         compositor,
         input_method::{InputMethodHandle, InputMethodSeat},
@@ -1221,7 +1221,37 @@ fn render_surface<'a>(
     let (rendered, states) = surface
         .compositor
         .render_frame::<_, OutputRenderElements<_, _>, _>(renderer, &elements, clear_color, logger.clone())
-        .map(|render_frame_result| (render_frame_result.damage.is_some(), render_frame_result.states))
+        .map(|render_frame_result| {
+            if render_frame_result.damage.is_some() {
+                let size = output.current_mode().unwrap().size;
+                let offscreen: Gles2Renderbuffer = renderer
+                    .create_buffer(size.to_logical(1).to_buffer(1, Transform::Normal))
+                    .unwrap();
+                renderer.bind(offscreen).unwrap();
+                render_frame_result
+                    .blit_frame_result(
+                        size,
+                        output.current_transform(),
+                        output.current_scale().fractional_scale(),
+                        renderer,
+                        [Rectangle::from_loc_and_size((0, 0), size)],
+                        [],
+                        logger,
+                    )
+                    .unwrap();
+                let mapping = renderer
+                    .copy_framebuffer(Rectangle::from_loc_and_size(
+                        (0, 0),
+                        size.to_logical(1).to_buffer(1, Transform::Normal),
+                    ))
+                    .unwrap();
+                let data = renderer.map_texture(&mapping).unwrap();
+                let image_buffer: image::ImageBuffer<image::Rgba<u8>, _> =
+                    image::ImageBuffer::from_raw(size.w as u32, size.h as u32, data).unwrap();
+                image_buffer.save("/tmp/out.png").unwrap();
+            }
+            (render_frame_result.damage.is_some(), render_frame_result.states)
+        })
         .map_err(|err| match err {
             smithay::backend::drm::compositor::RenderFrameError::PrepareFrame(err) => {
                 SwapBuffersError::from(err)

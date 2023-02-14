@@ -48,6 +48,7 @@ udev = [
   "smithay/backend_egl",
   "smithay/backend_session_libseat",
   "image",
+  "image/png",
   "smithay/renderer_gl",
   "smithay/renderer_multi",
   "xcursor",
