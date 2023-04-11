@@ -613,7 +613,7 @@ impl<T: Texture + Clone> TextureRenderElement<T> {
             size,
             buffer.opaque_regions.as_ref().map(|regions| {
                 regions
-                    .into_iter()
+                    .iter()
                     .map(|region| region.to_logical(buffer.scale, buffer.transform, &buffer.texture.size()))
                     .collect::<Vec<_>>()
             }),
@@ -642,7 +642,7 @@ impl<T: Texture + Clone> TextureRenderElement<T> {
             size,
             buffer.opaque_regions.as_ref().map(|regions| {
                 regions
-                    .into_iter()
+                    .iter()
                     .map(|region| region.to_logical(buffer.scale, buffer.transform, &buffer.texture.size()))
                     .collect::<Vec<_>>()
             }),
