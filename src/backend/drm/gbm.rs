@@ -11,6 +11,7 @@ use drm::{
 };
 use drm_fourcc::DrmModifier;
 use gbm::BufferObject;
+use tracing::warn;
 #[cfg(feature = "wayland_frontend")]
 use wayland_server::protocol::wl_buffer::WlBuffer;
 
@@ -29,14 +30,16 @@ use crate::utils::DevPath;
 /// A GBM backed framebuffer
 #[derive(Debug)]
 pub struct GbmFramebuffer {
-    _bo: Option<BufferObject<()>>,
     fb: framebuffer::Handle,
+    _bo: Option<BufferObject<()>>,
     drm: DrmDeviceFd,
 }
 
 impl Drop for GbmFramebuffer {
     fn drop(&mut self) {
-        let _ = self.drm.destroy_framebuffer(self.fb);
+        if let Err(err) = self.drm.destroy_framebuffer(self.fb) {
+            warn!(?err, "failed to destroy framebuffer");
+        }
     }
 }
 
