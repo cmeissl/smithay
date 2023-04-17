@@ -2202,8 +2202,6 @@ where
         R: Renderer + Bind<Dmabuf> + Offscreen<Target> + ExportMem,
         E: RenderElement<R>,
     {
-        return Err(None);
-
         let mut rendering_reason: Option<RenderingReason> = None;
 
         if try_assign_primary_plane {
