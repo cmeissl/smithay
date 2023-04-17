@@ -293,6 +293,7 @@ where
 
     fn cleanup(&mut self) {
         self.fb_cache.retain(|key, _| key.is_alive());
+        eprintln!("self.fb_cache.len={}", self.fb_cache.len());
     }
 }
 
@@ -1472,6 +1473,11 @@ where
         // Just reset any next state, this will put
         // any already acquired slot back to the swapchain
         self.next_frame.take();
+
+        // Cleanup old state (e.g. old dmabuffers)
+        for element_state in self.element_states.values_mut() {
+            element_state.cleanup();
+        }
 
         let current_size = self.output.current_mode().unwrap().size;
         let output_scale = self.output.current_scale().fractional_scale().into();
