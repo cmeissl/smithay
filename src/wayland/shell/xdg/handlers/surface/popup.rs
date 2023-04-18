@@ -37,6 +37,7 @@ where
                 if let Some(surface_data) = data.xdg_surface.data::<XdgSurfaceUserData>() {
                     surface_data.has_active_role.store(false, Ordering::Release);
                 }
+                data.alive_tracker.destroy_notify();
             }
             xdg_popup::Request::Grab { seat, serial } => {
                 let handle = crate::wayland::shell::xdg::PopupSurface {

@@ -38,6 +38,7 @@ where
                 if let Some(surface_data) = data.xdg_surface.data::<XdgSurfaceUserData>() {
                     surface_data.has_active_role.store(false, Ordering::Release);
                 }
+                data.alive_tracker.destroy_notify();
             }
             xdg_toplevel::Request::SetParent { parent } => {
                 let parent_surface = parent.map(|toplevel_surface_parent| {
