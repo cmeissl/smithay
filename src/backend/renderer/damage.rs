@@ -587,6 +587,7 @@ impl OutputDamageTracker {
                 })
                 .filter_map(|geo| geo.intersection(output_geo))
                 .collect::<Vec<_>>();
+            tracing::trace!(element = ?element_id, ?element_output_damage, "accumulating element damage");
             damage.extend(element_output_damage);
 
             let element_opaque_regions = element
@@ -642,6 +643,7 @@ impl OutputDamageTracker {
                     )
             })
             .collect::<Vec<_>>();
+        tracing::trace!(?elements_gone, "accumulating damage from elements gone");
         damage.extend(elements_gone);
 
         // if the element has been moved or it's alpha or z index changed, damage it
@@ -667,6 +669,7 @@ impl OutputDamageTracker {
                             .filter_map(|i| i.last_geometry.intersection(output_geo)),
                     );
                 }
+                tracing::trace!(element = ?element.id(), ?element_damage, "accumulating damage for moved element");
                 damage.extend(
                     opaque_regions
                         .iter()
@@ -698,10 +701,10 @@ impl OutputDamageTracker {
 
         // We now add old damage states, if we have an age value
         if age > 0 && self.last_state.old_damage.len() >= age {
-            trace!("age of {} recent enough, using old damage", age);
             // We do not need even older states anymore
             self.last_state.old_damage.truncate(age);
             damage.extend(self.last_state.old_damage.iter().flatten().copied());
+            trace!(age, old_damage = ?self.last_state.old_damage.iter().flatten().copied(), "age recent enough, using old damage");
         } else {
             trace!(
                 "no old damage available, re-render everything. age: {} old_damage len: {}",
