@@ -575,18 +575,18 @@ impl GlesRenderer {
             if gl_version >= version::GLES_3_0 {
                 capabilities.push(Capability::Blit);
                 debug!("Blitting is supported");
-                // required to bind the 16F-buffer we want to use for blending.
-                //
-                // Note: We could technically also have a 16F shadow buffer on 2.0 with GL_OES_texture_half_float.
-                // The problem is, that the main output format we are interested in for this `ABGR2101010` is not renderable on 2.0,
-                // and as far as I know there is no extension to change that. So we could pradoxically not copy the shadow buffer
-                // to our output buffer, *except* if we scanout 16F directly...
-                //
-                // So lets not go down that route and attempt to support color-transformations and HDR stuff with ES 2.0.
-                if exts.iter().any(|ext| ext == "GL_EXT_color_buffer_half_float") {
-                    capabilities.push(Capability::ColorTransformations);
-                    debug!("Color Transformations are supported");
-                }
+                // // required to bind the 16F-buffer we want to use for blending.
+                // //
+                // // Note: We could technically also have a 16F shadow buffer on 2.0 with GL_OES_texture_half_float.
+                // // The problem is, that the main output format we are interested in for this `ABGR2101010` is not renderable on 2.0,
+                // // and as far as I know there is no extension to change that. So we could pradoxically not copy the shadow buffer
+                // // to our output buffer, *except* if we scanout 16F directly...
+                // //
+                // // So lets not go down that route and attempt to support color-transformations and HDR stuff with ES 2.0.
+                // if exts.iter().any(|ext| ext == "GL_EXT_color_buffer_half_float") {
+                //     capabilities.push(Capability::ColorTransformations);
+                //     debug!("Color Transformations are supported");
+                // }
             }
             if exts.iter().any(|ext| ext == "GL_OES_EGL_sync") {
                 debug!("Fencing is supported");
