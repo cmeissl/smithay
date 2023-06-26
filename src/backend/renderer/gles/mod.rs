@@ -2276,6 +2276,13 @@ impl Renderer for GlesRenderer {
         sync.wait();
         Ok(())
     }
+
+    fn cleanup_texture_cache(&mut self) {
+        let _ = self.make_current();
+        unsafe {
+            self.gl.Flush();
+        }
+    }
 }
 
 /// Vertices for instanced rendering.

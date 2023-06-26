@@ -291,6 +291,8 @@ pub trait Renderer {
         sync.wait();
         Ok(())
     }
+
+    fn cleanup_texture_cache(&mut self) {}
 }
 
 /// Trait for renderers that support creating offscreen framebuffers to render into.
