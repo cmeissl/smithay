@@ -230,6 +230,7 @@ impl Dmabuf {
     ///
     /// Usually used to block applying surface state on the readiness of an attached dmabuf.
     #[cfg(feature = "wayland_frontend")]
+    #[profiling::function]
     pub fn generate_blocker(
         &self,
         interest: Interest,
@@ -381,6 +382,7 @@ impl DmabufSource {
     /// To monitor for new fences added at a later time a new DmabufSource needs to be created.
     ///
     /// Returns `AlreadyReady` if all corresponding fences are already signalled or if `interest` is empty.
+    #[profiling::function]
     pub fn new(dmabuf: Dmabuf, interest: Interest) -> Result<Self, AlreadyReady> {
         if !interest.readable && !interest.writable {
             return Err(AlreadyReady);

@@ -17,6 +17,16 @@ fn main() {
         tracing_subscriber::fmt().compact().init();
     }
 
+    #[cfg(feature = "profile-with-tracy")]
+    profiling::tracy_client::Client::start();
+
+    profiling::register_thread!("Main Thread");
+
+    #[cfg(feature = "profile-with-puffin")]
+    let _server = puffin_http::Server::new(&format!("0.0.0.0:{}", puffin_http::DEFAULT_PORT)).unwrap();
+    #[cfg(feature = "profile-with-puffin")]
+    profiling::puffin::set_scopes_on(true);
+
     let arg = ::std::env::args().nth(1);
     match arg.as_ref().map(|s| &s[..]) {
         #[cfg(feature = "winit")]

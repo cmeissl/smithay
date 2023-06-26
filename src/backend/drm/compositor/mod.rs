@@ -481,6 +481,7 @@ impl<B: AsRef<framebuffer::Handle>> FrameState<B> {
 }
 
 impl<B: AsRef<framebuffer::Handle>> FrameState<B> {
+    #[profiling::function]
     fn test_state(
         &mut self,
         surface: &DrmSurface,
@@ -506,6 +507,7 @@ impl<B: AsRef<framebuffer::Handle>> FrameState<B> {
         res
     }
 
+    #[profiling::function]
     fn commit(
         &mut self,
         surface: &DrmSurface,
@@ -515,6 +517,7 @@ impl<B: AsRef<framebuffer::Handle>> FrameState<B> {
         surface.commit(self.build_planes(supports_fencing, false), event)
     }
 
+    #[profiling::function]
     fn page_flip(
         &mut self,
         surface: &DrmSurface,
@@ -524,6 +527,7 @@ impl<B: AsRef<framebuffer::Handle>> FrameState<B> {
         surface.page_flip(self.build_planes(supports_fencing, false), event)
     }
 
+    #[profiling::function]
     fn build_planes(
         &mut self,
         supports_fencing: bool,
@@ -1533,6 +1537,7 @@ where
     ///
     /// - `elements` for this frame in front-to-back order
     #[instrument(level = "trace", parent = &self.span, skip_all)]
+    #[profiling::function]
     pub fn render_frame<'a, R, E, Target>(
         &mut self,
         renderer: &mut R,
@@ -2104,6 +2109,7 @@ where
     /// Otherwise the underlying swapchain will eventually run out of buffers.
     ///
     /// `user_data` can be used to attach some data to a specific buffer and later retrieved with [`DrmCompositor::frame_submitted`]
+    #[profiling::function]
     pub fn queue_frame(&mut self, user_data: U) -> FrameResult<(), A, F> {
         let next_frame = self.next_frame.take().ok_or(FrameErrorType::<A, F>::EmptyFrame)?;
 
@@ -2131,6 +2137,7 @@ where
         Ok(())
     }
 
+    #[profiling::function]
     fn submit(&mut self) -> FrameResult<(), A, F> {
         let (mut state, user_data) = self.queued_frame.take().unwrap();
 
@@ -2288,6 +2295,7 @@ where
 
     #[allow(clippy::too_many_arguments)]
     #[instrument(level = "trace", skip_all)]
+    #[profiling::function]
     fn try_assign_element<'a, R, E, Target>(
         &mut self,
         renderer: &mut R,
@@ -2374,6 +2382,7 @@ where
 
     #[allow(clippy::too_many_arguments)]
     #[instrument(level = "trace", skip_all)]
+    #[profiling::function]
     fn try_assign_cursor_plane<R, E, Target>(
         &mut self,
         renderer: &mut R,
@@ -2709,6 +2718,7 @@ where
 
     #[allow(clippy::too_many_arguments)]
     #[instrument(level = "trace", skip_all)]
+    #[profiling::function]
     fn try_assign_overlay_plane<'a, R, E>(
         &self,
         renderer: &mut R,
@@ -2836,6 +2846,7 @@ where
 
     #[allow(clippy::too_many_arguments)]
     #[instrument(level = "trace", skip_all)]
+    #[profiling::function]
     fn try_assign_primary_plane<R, E>(
         &self,
         renderer: &mut R,
@@ -2885,6 +2896,7 @@ where
 
     #[allow(clippy::too_many_arguments)]
     #[instrument(level = "trace", skip_all)]
+    #[profiling::function]
     fn try_assign_plane<R, E>(
         &self,
         element: &E,

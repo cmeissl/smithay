@@ -217,6 +217,7 @@ impl EGLContext {
     /// This function is marked unsafe, because the context cannot be made current on another thread without
     /// being unbound again (see [`EGLContext::unbind`]).
     #[instrument(level = "trace", skip_all, parent = &self.span, err)]
+    #[profiling::function]
     pub unsafe fn make_current(&self) -> Result<(), MakeCurrentError> {
         wrap_egl_call(|| {
             ffi::egl::MakeCurrent(
@@ -249,6 +250,7 @@ impl EGLContext {
     /// This function is marked unsafe, because the context cannot be made current on another thread without
     /// being unbound again (see [`EGLContext::unbind`]).
     #[instrument(level = "trace", skip_all, parent = &self.span, err)]
+    #[profiling::function]
     pub unsafe fn make_current_with_draw_and_read_surface(
         &self,
         draw_surface: &EGLSurface,
@@ -287,6 +289,7 @@ impl EGLContext {
     ///
     /// This does nothing if this context is not the current context.
     #[instrument(level = "trace", skip_all, parent = &self.span, err)]
+    #[profiling::function]
     pub fn unbind(&self) -> Result<(), MakeCurrentError> {
         if self.is_current() {
             wrap_egl_call(|| unsafe {

@@ -54,6 +54,7 @@ impl<A: AsFd + 'static> GbmAllocator<A> {
     /// Alternative to [`Allocator::create_buffer`], if you need a one-off buffer with
     /// a different set of usage flags.
     #[instrument(level = "trace", skip(self), fields(self.device = ?self.device, err))]
+    #[profiling::function]
     pub fn create_buffer_with_flags(
         &mut self,
         width: u32,
@@ -147,6 +148,7 @@ impl<T> AsDmabuf for GbmBuffer<T> {
     type Error = GbmConvertError;
 
     #[cfg(feature = "backend_gbm_has_fd_for_plane")]
+    #[profiling::function]
     fn export(&self) -> Result<Dmabuf, GbmConvertError> {
         let planes = self.plane_count()? as i32;
 
@@ -168,6 +170,7 @@ impl<T> AsDmabuf for GbmBuffer<T> {
     }
 
     #[cfg(not(feature = "backend_gbm_has_fd_for_plane"))]
+    #[profiling::function]
     fn export(&self) -> Result<Dmabuf, GbmConvertError> {
         let planes = self.plane_count()? as i32;
 
@@ -209,6 +212,7 @@ impl<T> AsDmabuf for GbmBuffer<T> {
 
 impl Dmabuf {
     /// Import a Dmabuf using libgbm, creating a gbm Buffer Object to the same underlying data.
+    #[profiling::function]
     pub fn import_to<A: AsFd + 'static, T>(
         &self,
         gbm: &GbmDevice<A>,
