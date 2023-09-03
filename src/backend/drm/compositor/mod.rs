@@ -545,8 +545,8 @@ impl<B: AsRef<framebuffer::Handle>> FrameState<B> {
 
         self.planes
             .iter_mut()
-            // Filter out any skipped planes
-            .filter(|(_, state)| !state.skip)
+            // // Filter out any skipped planes
+            // .filter(|(_, state)| !state.skip)
             .map(move |(handle, state)| super::surface::PlaneState {
                 handle: *handle,
                 config: state.config.as_mut().map(|config| super::PlaneConfig {
