@@ -182,8 +182,8 @@ impl RendererSurfaceState {
                                     RectangleKind::Add => {
                                         let added_regions = rect.subtract_rects(
                                             new_regions
-                                                .iter()
-                                                .filter(|region| region.overlaps_or_touches(rect))
+                                            .iter()
+                                            .filter(|region| region.overlaps_or_touches(rect))
                                                 .copied(),
                                         );
                                         new_regions.extend(added_regions);
@@ -221,7 +221,6 @@ impl RendererSurfaceState {
     ///
     /// If either the commit is `None` or the commit is too old
     /// the whole buffer will be returned as damage.
-    #[profiling::function]
     pub fn damage_since(&self, commit: Option<CommitCounter>) -> Vec<Rectangle<i32, BufferCoord>> {
         self.damage.damage_since(commit).unwrap_or_else(|| {
             self.buffer_dimensions
