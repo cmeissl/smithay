@@ -7,10 +7,10 @@ static POSSIBLE_BACKENDS: &[&str] = &[
     "--x11 : Run anvil as an X11 client.",
 ];
 
-#[cfg(feature = "profile-with-tracy")]
-#[global_allocator]
-static GLOBAL: profiling::tracy_client::ProfiledAllocator<std::alloc::System> =
-    profiling::tracy_client::ProfiledAllocator::new(std::alloc::System, 10);
+// #[cfg(feature = "profile-with-tracy")]
+// #[global_allocator]
+// static GLOBAL: profiling::tracy_client::ProfiledAllocator<std::alloc::System> =
+//     profiling::tracy_client::ProfiledAllocator::new(std::alloc::System, 10);
 
 fn main() {
     if let Ok(env_filter) = tracing_subscriber::EnvFilter::try_from_default_env() {

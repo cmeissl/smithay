@@ -132,6 +132,7 @@ use std::{
 use ::gbm::{BufferObject, BufferObjectFlags};
 use drm::control::{connector, crtc, framebuffer, plane, Mode, PlaneType};
 use drm_fourcc::{DrmFormat, DrmFourcc, DrmModifier};
+use fxhash::FxBuildHasher;
 use indexmap::IndexMap;
 use tracing::{debug, error, info, info_span, instrument, trace, warn};
 use wayland_server::{protocol::wl_buffer::WlBuffer, Resource};
@@ -163,6 +164,8 @@ use crate::{
 };
 
 use super::{DrmDeviceFd, DrmSurface, Framebuffer, PlaneClaim, PlaneInfo, Planes};
+
+type FxIndexMap<K, V> = IndexMap<K, V, FxBuildHasher>;
 
 mod elements;
 pub mod gbm;
@@ -333,23 +336,26 @@ where
     B: Framebuffer,
 {
     /// Cache for framebuffer handles per cache key (e.g. wayland buffer)
-    fb_cache: HashMap<ElementFramebufferCacheKey, Result<OwnedFramebuffer<B>, ExportBufferError>>,
+    fb_cache: Vec<(
+        ElementFramebufferCacheKey,
+        Result<OwnedFramebuffer<B>, ExportBufferError>,
+    )>,
 }
 
 impl<B> ElementFramebufferCache<B>
 where
     B: Framebuffer,
 {
+    #[inline]
     fn get(
         &self,
         buffer: &UnderlyingStorage,
         allow_opaque_fallback: bool,
     ) -> Option<Result<OwnedFramebuffer<B>, ExportBufferError>> {
+        let key = ElementFramebufferCacheKey::from_underlying_storage(buffer, allow_opaque_fallback);
         self.fb_cache
-            .get(&ElementFramebufferCacheKey::from_underlying_storage(
-                buffer,
-                allow_opaque_fallback,
-            ))
+            .iter()
+            .find_map(|(k, b)| if *k == key { Some(b) } else { None })
             .cloned()
     }
 
@@ -359,14 +365,21 @@ where
         fb: Result<OwnedFramebuffer<B>, ExportBufferError>,
         allow_opaque_fallback: bool,
     ) {
-        self.fb_cache.insert(
-            ElementFramebufferCacheKey::from_underlying_storage(buffer, allow_opaque_fallback),
-            fb,
-        );
+        let key = ElementFramebufferCacheKey::from_underlying_storage(buffer, allow_opaque_fallback);
+        let existing = self
+            .fb_cache
+            .iter_mut()
+            .find_map(|(k, b)| if *k == key { Some(b) } else { None });
+
+        if let Some(b) = existing {
+            *b = fb;
+        } else {
+            self.fb_cache.push((key, fb))
+        }
     }
 
     fn cleanup(&mut self) {
-        self.fb_cache.retain(|key, _| key.is_alive());
+        self.fb_cache.retain(|(key, _)| key.is_alive());
     }
 }
 
@@ -392,7 +405,7 @@ where
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone)]
 struct PlaneProperties {
     pub src: Rectangle<f64, BufferCoords>,
     pub dst: Rectangle<i32, Physical>,
@@ -402,6 +415,7 @@ struct PlaneProperties {
 }
 
 impl PlaneProperties {
+    #[profiling::function]
     fn is_compatible(&self, other: &PlaneProperties) -> bool {
         self.src == other.src
             && self.dst == other.dst
@@ -499,20 +513,20 @@ impl<B> Clone for PlaneState<B> {
 
 #[derive(Debug)]
 struct FrameState<B: AsRef<framebuffer::Handle>> {
-    planes: HashMap<plane::Handle, PlaneState<B>>,
+    planes: Vec<(plane::Handle, PlaneState<B>)>,
 }
 
 impl<B: AsRef<framebuffer::Handle>> FrameState<B> {
+    #[inline]
     fn is_assigned(&self, handle: plane::Handle) -> bool {
-        self.planes
-            .get(&handle)
-            .map(|config| config.config.is_some())
+        self.plane_state(handle)
+            .map(|state| state.config.is_some())
             .unwrap_or(false)
     }
 
+    #[inline]
     fn overlaps(&self, handle: plane::Handle, element_geometry: Rectangle<i32, Physical>) -> bool {
-        self.planes
-            .get(&handle)
+        self.plane_state(handle)
             .and_then(|state| {
                 state
                     .config
@@ -522,14 +536,21 @@ impl<B: AsRef<framebuffer::Handle>> FrameState<B> {
             .unwrap_or(false)
     }
 
+    #[inline]
     fn plane_state(&self, handle: plane::Handle) -> Option<&PlaneState<B>> {
-        self.planes.get(&handle)
+        self.planes
+            .iter()
+            .find_map(|(p, state)| if *p == handle { Some(state) } else { None })
     }
 
+    #[inline]
     fn plane_state_mut(&mut self, handle: plane::Handle) -> Option<&mut PlaneState<B>> {
-        self.planes.get_mut(&handle)
+        self.planes
+            .iter_mut()
+            .find_map(|(p, state)| if *p == handle { Some(state) } else { None })
     }
 
+    #[profiling::function]
     fn plane_properties(&self, handle: plane::Handle) -> Option<&PlaneProperties> {
         self.plane_state(handle)
             .and_then(|state| state.config.as_ref())
@@ -593,10 +614,10 @@ impl<B> Clone for Owned<B> {
 impl<B: Framebuffer> FrameState<B> {
     fn from_planes(planes: &Planes) -> Self {
         let cursor_plane_count = usize::from(planes.cursor.is_some());
-        let mut tmp = HashMap::with_capacity(planes.overlay.len() + cursor_plane_count + 1);
-        tmp.insert(planes.primary.handle, PlaneState::default());
+        let mut tmp = Vec::with_capacity(planes.overlay.len() + cursor_plane_count + 1);
+        tmp.push((planes.primary.handle, PlaneState::default()));
         if let Some(info) = planes.cursor.as_ref() {
-            tmp.insert(info.handle, PlaneState::default());
+            tmp.push((info.handle, PlaneState::default()));
         }
         tmp.extend(
             planes
@@ -612,11 +633,10 @@ impl<B: Framebuffer> FrameState<B> {
 impl<B: Framebuffer> FrameState<B> {
     #[profiling::function]
     fn set_state(&mut self, plane: plane::Handle, state: PlaneState<B>) {
-        let current_config = match self.planes.get_mut(&plane) {
-            Some(config) => config,
-            None => return,
+        let Some(current_state) = self.plane_state_mut(plane) else {
+            return;
         };
-        *current_config = state;
+        *current_state = state;
     }
 
     #[profiling::function]
@@ -628,18 +648,17 @@ impl<B: Framebuffer> FrameState<B> {
         state: PlaneState<B>,
         allow_modeset: bool,
     ) -> Result<(), DrmError> {
-        let current_config = match self.planes.get_mut(&plane) {
-            Some(config) => config,
-            None => return Ok(()),
+        let Some(current_state) = self.plane_state_mut(plane) else {
+            return Ok(());
         };
-        let backup = current_config.clone();
-        *current_config = state;
+        let backup = current_state.clone();
+        *current_state = state;
 
         let res = surface.test_state(self.build_planes(supports_fencing), allow_modeset);
 
         if res.is_err() {
             // test failed, restore previous state
-            self.planes.insert(plane, backup);
+            self.set_state(plane, backup);
         } else {
             self.planes
                 .iter_mut()
@@ -1065,7 +1084,7 @@ where
     where
         E: Element,
     {
-        let filter_ids: HashSet<Id> = filter.into_iter().collect();
+        let filter_ids: Vec<Id> = filter.into_iter().collect();
 
         let mut elements: Vec<FrameResultDamageElement<'_, '_, E, B>> =
             Vec::with_capacity(usize::from(self.cursor_element.is_some()) + self.overlay_elements.len() + 1);
@@ -1130,7 +1149,7 @@ where
     {
         let size = size.into();
         let scale = scale.into();
-        let filter_ids: HashSet<Id> = filter.into_iter().collect();
+        let filter_ids: Vec<Id> = filter.into_iter().collect();
         let damage = damage.into_iter().collect::<Vec<_>>();
 
         // If we have no damage we can exit early
@@ -1180,12 +1199,8 @@ where
             }
         };
 
-        let clear_damage = opaque_regions.iter().fold(damage.clone(), |damage, region| {
-            damage
-                .into_iter()
-                .flat_map(|geo| geo.subtract_rect(*region))
-                .collect::<Vec<_>>()
-        });
+        let clear_damage =
+            Rectangle::subtract_rects_many_in_place(damage.clone(), opaque_regions.iter().copied());
 
         let mut sync: Option<SyncPoint> = None;
         if !clear_damage.is_empty() {
@@ -1413,7 +1428,7 @@ where
     cursor_state: Option<CursorState<G>>,
 
     element_states:
-        IndexMap<Id, ElementState<DrmFramebuffer<<F as ExportFramebuffer<A::Buffer>>::Framebuffer>>>,
+        FxIndexMap<Id, ElementState<DrmFramebuffer<<F as ExportFramebuffer<A::Buffer>>::Framebuffer>>>,
 
     debug_flags: DebugFlags,
     span: tracing::Span,
@@ -1537,7 +1552,7 @@ where
                         output_mode_source,
                         planes,
                         overlay_plane_element_ids,
-                        element_states: IndexMap::new(),
+                        element_states: Default::default(),
                         supports_fencing,
                         debug_flags: DebugFlags::empty(),
                         span,
@@ -1807,13 +1822,6 @@ where
             .unwrap()
             .clone();
 
-        let mut output_damage: Vec<Rectangle<i32, Physical>> = Vec::new();
-        let mut opaque_regions: Vec<Rectangle<i32, Physical>> = Vec::new();
-        let mut element_states = IndexMap::new();
-        let mut render_element_states = RenderElementStates {
-            states: Default::default(),
-        };
-
         // So first we want to create a clean state, for that we have to reset all overlay and cursor planes
         // to nothing. We only want to test if the primary plane alone can be used for scan-out.
         let mut next_frame_state = {
@@ -1840,6 +1848,14 @@ where
             }
 
             next_frame_state
+        };
+
+        let mut output_damage: Vec<Rectangle<i32, Physical>> = Vec::new();
+        let mut opaque_regions: Vec<Rectangle<i32, Physical>> = Vec::new();
+        let mut element_states =
+            FxIndexMap::with_capacity_and_hasher(next_frame_state.planes.len(), FxBuildHasher::default());
+        let mut render_element_states = RenderElementStates {
+            states: HashMap::with_capacity(elements.len()),
         };
 
         // We want to make sure we can actually scan-out the primary plane, so
@@ -1896,14 +1912,8 @@ where
             };
 
             // Then test if the element is completely hidden behind opaque regions
-            let element_visible_area = opaque_regions
-                .iter()
-                .fold([element_output_geometry].to_vec(), |geometry, opaque_region| {
-                    geometry
-                        .into_iter()
-                        .flat_map(|g| g.subtract_rect(*opaque_region))
-                        .collect::<Vec<_>>()
-                })
+            let element_visible_area = element_output_geometry
+                .subtract_rects(opaque_regions.iter().copied())
                 .into_iter()
                 .fold(0usize, |acc, item| acc + (item.size.w * item.size.h) as usize);
 
@@ -2173,10 +2183,6 @@ where
                 (dmabuf, age)
             };
 
-            renderer
-                .bind(dmabuf)
-                .map_err(OutputDamageTrackerError::Rendering)?;
-
             // store the current renderer debug flags and replace them
             // with our own
             let renderer_debug_flags = renderer.debug_flags();
@@ -2194,8 +2200,6 @@ where
             // commit -> unlikely but possible
             // So we use an Id per plane for as long as we have the same element
             // on that plane.
-            let overlay_plane_lookup: HashMap<plane::Handle, &PlaneInfo> =
-                self.planes.overlay.iter().map(|p| (p.handle, p)).collect();
             let mut elements = overlay_plane_elements
                 .iter()
                 .filter_map(|(p, element)| {
@@ -2203,8 +2207,15 @@ where
                         .overlay_plane_element_ids
                         .plane_id_for_element_id(p, element.id());
 
-                    let is_underlay = overlay_plane_lookup.get(p).unwrap().zpos.unwrap_or_default()
-                        < self.planes.primary.zpos.unwrap_or_default();
+                    let plane_info = self
+                        .planes
+                        .overlay
+                        .iter()
+                        .find_map(|o| if o.handle == *p { Some(o) } else { None })
+                        .unwrap();
+
+                    let is_underlay =
+                        plane_info.zpos.unwrap_or_default() < self.planes.primary.zpos.unwrap_or_default();
                     if is_underlay {
                         Some(HolepunchRenderElement::from_render_element(id, element, output_scale).into())
                     } else {
@@ -2221,9 +2232,9 @@ where
                     .map(|e| DrmRenderElements::Other(*e)),
             );
 
-            let render_res = self
-                .damage_tracker
-                .render_output(renderer, age, &elements, clear_color);
+            let render_res =
+                self.damage_tracker
+                    .render_output_with(renderer, dmabuf, age, &elements, clear_color);
 
             // restore the renderer debug flags
             renderer.set_debug_flags(renderer_debug_flags);
@@ -2590,7 +2601,7 @@ where
         renderer: &mut R,
         element: &'a E,
         element_zindex: usize,
-        element_states: &mut IndexMap<
+        element_states: &mut FxIndexMap<
             Id,
             ElementState<DrmFramebuffer<<F as ExportFramebuffer<A::Buffer>>::Framebuffer>>,
         >,
@@ -2659,23 +2670,10 @@ where
             };
         }
 
-        let mut element_config = self.element_config(
-            renderer,
-            element,
-            element_zindex,
-            element_states,
-            frame_state,
-            scale,
-            output_transform,
-            output_geometry,
-            false,
-        );
-
         if let Some(plane) = self.try_assign_cursor_plane(
             renderer,
             element,
             element_zindex,
-            element_config.as_mut().ok(),
             scale,
             frame_state,
             output_damage,
@@ -2690,7 +2688,17 @@ where
             return Ok(plane);
         }
 
-        let element_config = element_config?;
+        let element_config = self.element_config(
+            renderer,
+            element,
+            element_zindex,
+            element_states,
+            frame_state,
+            scale,
+            output_transform,
+            output_geometry,
+            false,
+        )?;
 
         match self.try_assign_overlay_plane(
             element,
@@ -2718,7 +2726,7 @@ where
         renderer: &mut R,
         element: &'a E,
         element_zindex: usize,
-        element_states: &mut IndexMap<
+        element_states: &mut FxIndexMap<
             Id,
             ElementState<DrmFramebuffer<<F as ExportFramebuffer<A::Buffer>>::Framebuffer>>,
         >,
@@ -2788,15 +2796,6 @@ where
         renderer: &mut R,
         element: &E,
         element_zindex: usize,
-        element_config: Option<
-            &mut ElementPlaneConfig<
-                '_,
-                DrmScanoutBuffer<
-                    <A as Allocator>::Buffer,
-                    <F as ExportFramebuffer<<A as Allocator>::Buffer>>::Framebuffer,
-                >,
-            >,
-        >,
         scale: Scale<f64>,
         frame_state: &mut Frame<A, F>,
         output_damage: &mut Vec<Rectangle<i32, Physical>>,
@@ -2843,40 +2842,6 @@ where
                 plane_info.handle,
             );
             return None;
-        }
-
-        // if the element exposes the underlying storage we can try to do
-        // direct scan-out
-        if let Some(element_config) = element_config {
-            if !element_config.failed_planes.cursor {
-                trace!(
-                    "trying to assign element {:?} for direct scan-out on cursor {:?}",
-                    element.id(),
-                    plane_info.handle,
-                );
-
-                match self.try_assign_plane(
-                    element,
-                    element_config,
-                    plane_info,
-                    scale,
-                    frame_state,
-                    output_damage,
-                ) {
-                    Ok(Ok(plane)) => {
-                        trace!(
-                            "assigned element {:?} for direct scan-out on cursor {:?}",
-                            element.id(),
-                            plane_info.handle,
-                        );
-                        return Some(plane);
-                    }
-                    Ok(Err(Some(RenderingReason::ScanoutFailed))) => {
-                        element_config.failed_planes.cursor = true;
-                    }
-                    _ => {}
-                }
-            }
         }
 
         let Some(cursor_state) = self.cursor_state.as_mut() else {
@@ -3168,7 +3133,7 @@ where
         renderer: &mut R,
         element: &E,
         element_zindex: usize,
-        element_states: &'a mut IndexMap<
+        element_states: &'a mut FxIndexMap<
             Id,
             ElementState<DrmFramebuffer<<F as ExportFramebuffer<A::Buffer>>::Framebuffer>>,
         >,
@@ -3192,7 +3157,7 @@ where
         E: RenderElement<R>,
     {
         let element_id = element.id();
-        let element_geometry = element.geometry(scale);
+        let element_geometry = { element.geometry(scale) };
 
         // We can only try to do direct scan-out for element that provide a underlying storage
         let underlying_storage = element
@@ -3216,10 +3181,12 @@ where
                 },
             );
         }
-        let element_fb_cache = element_states
-            .get_mut(element_id)
-            .map(|state| &mut state.fb_cache)
-            .unwrap();
+        let element_fb_cache = {
+            element_states
+                .get_mut(element_id)
+                .map(|state| &mut state.fb_cache)
+                .unwrap()
+        };
 
         let cached_fb = element_fb_cache.get(&underlying_storage, allow_opaque_fallback);
 
@@ -3288,9 +3255,9 @@ where
             .unwrap()
             .instances
             .iter()
-            .any(|i| i.properties == properties)
+            .any(|i| i.properties.is_compatible(&properties))
         {
-            let overlay_bitmask =
+            let overlay_bitmask = {
                 self.planes
                     .overlay
                     .iter()
@@ -3300,16 +3267,19 @@ where
                             acc |= 1 << index;
                         }
                         acc
-                    });
-            let current_plane_snapshot = PlanesSnapshot {
-                primary: frame_state.is_assigned(self.planes.primary.handle),
-                cursor: self
-                    .planes
-                    .cursor
-                    .as_ref()
-                    .map(|plane| frame_state.is_assigned(plane.handle))
-                    .unwrap_or(false),
-                overlay_bitmask,
+                    })
+            };
+            let current_plane_snapshot = {
+                PlanesSnapshot {
+                    primary: frame_state.is_assigned(self.planes.primary.handle),
+                    cursor: self
+                        .planes
+                        .cursor
+                        .as_ref()
+                        .map(|plane| frame_state.is_assigned(plane.handle))
+                        .unwrap_or(false),
+                    overlay_bitmask,
+                }
             };
 
             let element_state = element_states.get_mut(element_id).unwrap();
@@ -3322,42 +3292,70 @@ where
             if let Some(previous_state) = self.element_states.get(element_id) {
                 // lets look if we find a previous instance with exactly the same properties.
                 // if we find one we can test if nothing changed and re-use the failed tests
-                let matching_instance = previous_state
-                    .instances
-                    .iter()
-                    .find(|i| i.properties == properties);
+                let matching_instance = {
+                    previous_state
+                        .instances
+                        .iter()
+                        .find(|i| i.properties.is_compatible(&properties))
+                };
 
                 if let Some(matching_instance) = matching_instance {
                     if current_plane_snapshot == matching_instance.active_planes {
-                        let previous_frame_state = self
-                            .pending_frame
-                            .as_ref()
-                            .map(|(state, _)| state)
-                            .unwrap_or(&self.current_frame);
+                        let previous_frame_state = {
+                            self.pending_frame
+                                .as_ref()
+                                .map(|(state, _)| state)
+                                .unwrap_or(&self.current_frame)
+                        };
 
                         // Note: we ignore the cursor plane here as this would result
                         // in constant re-tests of cursor moves and we do not expect
                         // that to influence the test state of our elements.
                         // Adding or removing cursor can influence the other planes, but
                         // is already covered in the active planes check.
-                        let primary_plane_changed = current_plane_snapshot
-                            .primary
-                            .then(|| {
-                                frame_state.plane_properties(self.planes.primary.handle)
-                                    != previous_frame_state.plane_properties(self.planes.primary.handle)
-                            })
-                            .unwrap_or(false);
+                        let primary_plane_changed = {
+                            if current_plane_snapshot.primary {
+                                let previous_plane_properties =
+                                    previous_frame_state.plane_properties(self.planes.primary.handle);
+                                let current_plane_properties =
+                                    frame_state.plane_properties(self.planes.primary.handle);
+                                match (current_plane_properties, previous_plane_properties) {
+                                    (None, None) => false,
+                                    (None, Some(_)) => true,
+                                    (Some(_), None) => true,
+                                    (Some(c), Some(p)) => !c.is_compatible(p),
+                                }
+                            } else {
+                                false
+                            }
 
-                        let overlay_plane_changed =
+                            // current_plane_snapshot
+                            //     .primary
+                            //     .then(|| {
+                            //         frame_state.plane_properties(self.planes.primary.handle)
+                            //             != previous_frame_state.plane_properties(self.planes.primary.handle)
+                            //     })
+                            //     .unwrap_or(false)
+                        };
+
+                        let overlay_plane_changed = {
                             self.planes.overlay.iter().enumerate().any(|(index, plane)| {
                                 // we only want to test planes that are currently in use
                                 if current_plane_snapshot.overlay_bitmask & (1 << index) == 0 {
                                     return false;
                                 }
 
-                                frame_state.plane_properties(plane.handle)
-                                    != previous_frame_state.plane_properties(plane.handle)
-                            });
+                                match (
+                                    frame_state.plane_properties(plane.handle),
+                                    previous_frame_state.plane_properties(plane.handle),
+                                ) {
+                                    (None, None) => false,
+                                    (None, Some(_)) => true,
+                                    (Some(_), None) => true,
+                                    (Some(c), Some(p)) => !c.is_compatible(p),
+                                }
+                            })
+                        };
 
                         if !(primary_plane_changed || overlay_plane_changed) {
                             // we now know that nothing changed and we can assume any previouly failed
@@ -3365,7 +3363,7 @@ where
                             let instance_state = element_state
                                 .instances
                                 .iter_mut()
-                                .find(|i| i.properties == properties)
+                                .find(|i| i.properties.is_compatible(&properties))
                                 .unwrap();
                             instance_state.failed_planes = matching_instance.failed_planes;
                         }
@@ -3374,19 +3372,21 @@ where
             }
         }
 
-        let failed_planes = element_states
-            .get_mut(element_id)
-            .unwrap()
-            .instances
-            .iter_mut()
-            .find_map(|i| {
-                if i.properties == properties {
-                    Some(&mut i.failed_planes)
-                } else {
-                    None
-                }
-            })
-            .unwrap();
+        let failed_planes = {
+            element_states
+                .get_mut(element_id)
+                .unwrap()
+                .instances
+                .iter_mut()
+                .find_map(|i| {
+                    if i.properties.is_compatible(&properties) {
+                        Some(&mut i.failed_planes)
+                    } else {
+                        None
+                    }
+                })
+                .unwrap()
+        };
 
         Ok(ElementPlaneConfig {
             properties,
@@ -3641,7 +3641,7 @@ where
             .map(|(state, _)| state)
             .unwrap_or(&self.current_frame);
 
-        let previous_commit = previous_state.planes.get(&plane.handle).and_then(|state| {
+        let previous_commit = previous_state.plane_state(plane.handle).and_then(|state| {
             state.element_state.as_ref().and_then(|state| {
                 if state.id == *element_id {
                     Some(state.commit)
@@ -3651,11 +3651,22 @@ where
             })
         });
 
-        let element_damage = element.damage_since(scale, previous_commit);
+        let element_damage = {
+            profiling::scope!("element_damage");
+            element.damage_since(scale, previous_commit)
+        };
 
-        let damage_clips = if element_damage.is_empty() {
+        let damage_clips = if element_damage.is_empty()
+            || element_damage.len() > 4
+            || element_damage.iter().any(|d| {
+                d.contains_rect(Rectangle::from_loc_and_size(
+                    Point::default(),
+                    element_config.geometry.size,
+                ))
+            }) {
             None
         } else {
+            profiling::scope!("build_damage_clips");
             PlaneDamageClips::from_damage(
                 self.surface.device_fd(),
                 element_config.properties.src,
@@ -3674,16 +3685,19 @@ where
             sync: None,
         };
 
-        let is_compatible = previous_state
-            .plane_state(plane.handle)
-            .map(|state| {
-                state
-                    .config
-                    .as_ref()
-                    .map(|c| c.is_compatible(&config))
-                    .unwrap_or(false)
-            })
-            .unwrap_or(false);
+        let is_compatible = {
+            profiling::scope!("test_is_compatible");
+            previous_state
+                .plane_state(plane.handle)
+                .map(|state| {
+                    state
+                        .config
+                        .as_ref()
+                        .map(|c| c.is_compatible(&config))
+                        .unwrap_or(false)
+                })
+                .unwrap_or(false)
+        };
 
         // We can only skip the plane update if we have no damage and if
         // the src/dst/alpha properties are unchanged. Also we can not skip if
@@ -3765,6 +3779,7 @@ where
     }
 }
 
+#[profiling::function]
 fn apply_underlying_storage_transform(
     element_transform: Transform,
     storage: &UnderlyingStorage,
@@ -3789,6 +3804,7 @@ fn apply_underlying_storage_transform(
     }
 }
 
+#[profiling::function]
 fn apply_output_transform(transform: Transform, output_transform: Transform) -> Transform {
     match (transform, output_transform) {
         (Transform::Normal, output_transform) => output_transform,
@@ -3861,16 +3877,7 @@ fn apply_output_transform(transform: Transform, output_transform: Transform) -> 
 fn element_is_opaque<E: Element>(element: &E, scale: Scale<f64>) -> bool {
     let opaque_regions = element.opaque_regions(scale);
     let element_geometry = Rectangle::from_loc_and_size(Point::default(), element.geometry(scale).size);
-
-    opaque_regions
-        .iter()
-        .fold([element_geometry].to_vec(), |geometry, opaque_region| {
-            geometry
-                .into_iter()
-                .flat_map(|g| g.subtract_rect(*opaque_region))
-                .collect::<Vec<_>>()
-        })
-        .is_empty()
+    element_geometry.subtract_rects(opaque_regions).is_empty()
 }
 
 struct OwnedFramebuffer<B: Framebuffer>(Arc<B>);

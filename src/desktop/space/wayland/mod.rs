@@ -1,9 +1,10 @@
 use std::{
     cell::{RefCell, RefMut},
-    collections::{HashMap, HashSet},
+    collections::HashMap,
 };
 
-use tracing::{debug, instrument};
+use fxhash::FxHashSet;
+use tracing::{instrument, trace};
 use wayland_server::{protocol::wl_surface::WlSurface, Resource, Weak as WlWeak};
 
 use crate::{
@@ -18,8 +19,9 @@ mod window;
 #[cfg(feature = "xwayland")]
 mod x11;
 
-type OutputSurfacesUserdata = RefCell<HashSet<WlWeak<WlSurface>>>;
-fn output_surfaces(o: &Output) -> RefMut<'_, HashSet<WlWeak<WlSurface>>> {
+type OutputSurfacesUserdata = RefCell<FxHashSet<WlWeak<WlSurface>>>;
+#[profiling::function]
+fn output_surfaces(o: &Output) -> RefMut<'_, FxHashSet<WlWeak<WlSurface>>> {
     let userdata = o.user_data();
     userdata.insert_if_missing(OutputSurfacesUserdata::default);
     let mut surfaces = userdata.get::<OutputSurfacesUserdata>().unwrap().borrow_mut();
@@ -83,7 +85,8 @@ fn output_update(output: &Output, output_overlap: Rectangle<i32, Logical>, surfa
     );
 }
 
-fn output_enter(output: &Output, surface_list: &mut HashSet<WlWeak<WlSurface>>, surface: &WlSurface) {
+#[profiling::function]
+fn output_enter(output: &Output, surface_list: &mut FxHashSet<WlWeak<WlSurface>>, surface: &WlSurface) {
     let weak = surface.downgrade();
     if !surface_list.contains(&weak) {
         trace!("surface entering output",);
@@ -92,7 +95,8 @@ fn output_enter(output: &Output, surface_list: &mut HashSet<WlWeak<WlSurface>>, 
     }
 }
 
-fn output_leave(output: &Output, surface_list: &mut HashSet<WlWeak<WlSurface>>, surface: &WlSurface) {
+#[profiling::function]
+fn output_leave(output: &Output, surface_list: &mut FxHashSet<WlWeak<WlSurface>>, surface: &WlSurface) {
     let weak = surface.downgrade();
     if surface_list.contains(&weak) {
         trace!("surface leaving output",);
