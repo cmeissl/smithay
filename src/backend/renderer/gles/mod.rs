@@ -961,6 +961,22 @@ impl ImportMemWl for GlesRenderer {
                     .TexParameteri(ffi::TEXTURE_2D, ffi::TEXTURE_WRAP_T, ffi::CLAMP_TO_EDGE as i32);
                 self.gl
                     .PixelStorei(ffi::UNPACK_ROW_LENGTH, stride / pixelsize as i32);
+                self.gl.TexParameteri(
+                    ffi::TEXTURE_2D,
+                    ffi::TEXTURE_MIN_FILTER,
+                    match self.min_filter {
+                        TextureFilter::Nearest => ffi::NEAREST as i32,
+                        TextureFilter::Linear => ffi::LINEAR as i32,
+                    },
+                );
+                self.gl.TexParameteri(
+                    ffi::TEXTURE_2D,
+                    ffi::TEXTURE_MAG_FILTER,
+                    match self.max_filter {
+                        TextureFilter::Nearest => ffi::NEAREST as i32,
+                        TextureFilter::Linear => ffi::LINEAR as i32,
+                    },
+                );
 
                 if upload_full || damage.is_empty() {
                     trace!("Uploading shm texture");
@@ -1078,6 +1094,22 @@ impl ImportMem for GlesRenderer {
                     .TexParameteri(ffi::TEXTURE_2D, ffi::TEXTURE_WRAP_S, ffi::CLAMP_TO_EDGE as i32);
                 self.gl
                     .TexParameteri(ffi::TEXTURE_2D, ffi::TEXTURE_WRAP_T, ffi::CLAMP_TO_EDGE as i32);
+                self.gl.TexParameteri(
+                    ffi::TEXTURE_2D,
+                    ffi::TEXTURE_MIN_FILTER,
+                    match self.min_filter {
+                        TextureFilter::Nearest => ffi::NEAREST as i32,
+                        TextureFilter::Linear => ffi::LINEAR as i32,
+                    },
+                );
+                self.gl.TexParameteri(
+                    ffi::TEXTURE_2D,
+                    ffi::TEXTURE_MAG_FILTER,
+                    match self.max_filter {
+                        TextureFilter::Nearest => ffi::NEAREST as i32,
+                        TextureFilter::Linear => ffi::LINEAR as i32,
+                    },
+                );
                 self.gl.TexImage2D(
                     ffi::TEXTURE_2D,
                     0,
@@ -1344,16 +1376,33 @@ impl GlesRenderer {
         let _scope = self
             .profiler
             .scope(tracy_client::span_location!("import_egl_image"), &self.gl);
-        let tex = tex.unwrap_or_else(|| unsafe {
-            let mut tex = 0;
-            self.gl.GenTextures(1, &mut tex);
-            tex
-        });
         let target = if is_external {
             ffi::TEXTURE_EXTERNAL_OES
         } else {
             ffi::TEXTURE_2D
         };
+        let tex = tex.unwrap_or_else(|| unsafe {
+            let mut tex = 0;
+            self.gl.GenTextures(1, &mut tex);
+            self.gl.BindTexture(target, tex);
+            self.gl.TexParameteri(
+                target,
+                ffi::TEXTURE_MIN_FILTER,
+                match self.min_filter {
+                    TextureFilter::Nearest => ffi::NEAREST as i32,
+                    TextureFilter::Linear => ffi::LINEAR as i32,
+                },
+            );
+            self.gl.TexParameteri(
+                target,
+                ffi::TEXTURE_MAG_FILTER,
+                match self.max_filter {
+                    TextureFilter::Nearest => ffi::NEAREST as i32,
+                    TextureFilter::Linear => ffi::LINEAR as i32,
+                },
+            );
+            tex
+        });
         unsafe {
             self.gl.BindTexture(target, tex);
             self.gl.EGLImageTargetTexture2DOES(target, image);
@@ -1555,6 +1604,22 @@ impl GlesRenderer {
                     let mut tex = 0;
                     self.gl.GenTextures(1, &mut tex);
                     self.gl.BindTexture(ffi::TEXTURE_2D, tex);
+                    self.gl.TexParameteri(
+                        ffi::TEXTURE_2D,
+                        ffi::TEXTURE_MIN_FILTER,
+                        match self.min_filter {
+                            TextureFilter::Nearest => ffi::NEAREST as i32,
+                            TextureFilter::Linear => ffi::LINEAR as i32,
+                        },
+                    );
+                    self.gl.TexParameteri(
+                        ffi::TEXTURE_2D,
+                        ffi::TEXTURE_MAG_FILTER,
+                        match self.max_filter {
+                            TextureFilter::Nearest => ffi::NEAREST as i32,
+                            TextureFilter::Linear => ffi::LINEAR as i32,
+                        },
+                    );
                     self.gl.TexImage2D(
                         ffi::TEXTURE_2D,
                         0,
@@ -1805,6 +1870,22 @@ impl Offscreen<GlesTexture> for GlesRenderer {
             let mut tex = 0;
             self.gl.GenTextures(1, &mut tex);
             self.gl.BindTexture(ffi::TEXTURE_2D, tex);
+            self.gl.TexParameteri(
+                ffi::TEXTURE_2D,
+                ffi::TEXTURE_MIN_FILTER,
+                match self.min_filter {
+                    TextureFilter::Nearest => ffi::NEAREST as i32,
+                    TextureFilter::Linear => ffi::LINEAR as i32,
+                },
+            );
+            self.gl.TexParameteri(
+                ffi::TEXTURE_2D,
+                ffi::TEXTURE_MAG_FILTER,
+                match self.max_filter {
+                    TextureFilter::Nearest => ffi::NEAREST as i32,
+                    TextureFilter::Linear => ffi::LINEAR as i32,
+                },
+            );
             self.gl.TexImage2D(
                 ffi::TEXTURE_2D,
                 0,
@@ -3058,22 +3139,22 @@ impl<'frame> GlesFrame<'frame> {
                 .enter(tracy_client::span_location!("setup"), gl);
             gl.ActiveTexture(ffi::TEXTURE0);
             gl.BindTexture(target, tex.0.texture);
-            gl.TexParameteri(
-                target,
-                ffi::TEXTURE_MIN_FILTER,
-                match self.renderer.min_filter {
-                    TextureFilter::Nearest => ffi::NEAREST as i32,
-                    TextureFilter::Linear => ffi::LINEAR as i32,
-                },
-            );
-            gl.TexParameteri(
-                target,
-                ffi::TEXTURE_MAG_FILTER,
-                match self.renderer.max_filter {
-                    TextureFilter::Nearest => ffi::NEAREST as i32,
-                    TextureFilter::Linear => ffi::LINEAR as i32,
-                },
-            );
+            // gl.TexParameteri(
+            //     target,
+            //     ffi::TEXTURE_MIN_FILTER,
+            //     match self.renderer.min_filter {
+            //         TextureFilter::Nearest => ffi::NEAREST as i32,
+            //         TextureFilter::Linear => ffi::LINEAR as i32,
+            //     },
+            // );
+            // gl.TexParameteri(
+            //     target,
+            //     ffi::TEXTURE_MAG_FILTER,
+            //     match self.renderer.max_filter {
+            //         TextureFilter::Nearest => ffi::NEAREST as i32,
+            //         TextureFilter::Linear => ffi::LINEAR as i32,
+            //     },
+            // );
             gl.UseProgram(program.program);
 
             gl.Uniform1i(program.uniform_tex, 0);
