@@ -170,6 +170,7 @@ use super::{DrmDeviceFd, DrmSurface, Framebuffer, PlaneClaim, PlaneInfo, Planes}
 
 mod elements;
 pub mod gbm;
+pub mod dumb;
 
 use elements::*;
 
