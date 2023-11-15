@@ -199,6 +199,18 @@ impl Bind<PixmanRenderBuffer> for PixmanRenderer {
         self.target = Some(PixmanTarget::RenderBuffer(target));
         Ok(())
     }
+
+    fn supported_formats(&self) -> Option<HashSet<DrmFormat>> {
+        lazy_static::lazy_static! {
+            static ref RENDER_BUFFER_FORMATS: HashSet<DrmFormat> = {
+                SUPPORTED_FORMATS.iter().copied().map(|code| DrmFormat {
+                    code,
+                    modifier: DrmModifier::Linear,
+                }).collect()
+            };
+        }
+        Some(RENDER_BUFFER_FORMATS.clone())
+    }
 }
 
 impl Drop for PixmanTarget {
@@ -1198,6 +1210,18 @@ impl Bind<Dmabuf> for PixmanRenderer {
         });
 
         Ok(())
+    }
+
+    fn supported_formats(&self) -> Option<HashSet<DrmFormat>> {
+        lazy_static::lazy_static! {
+            static ref DMABUF_FORMATS: HashSet<DrmFormat> = {
+                SUPPORTED_FORMATS.iter().copied().map(|code| DrmFormat {
+                    code,
+                    modifier: DrmModifier::Linear,
+                }).collect()
+            };
+        }
+        Some(DMABUF_FORMATS.clone())
     }
 }
 
