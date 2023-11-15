@@ -1,7 +1,6 @@
 use std::{
     collections::HashSet,
     ops::Deref,
-    os::unix::io::{AsFd, BorrowedFd},
     rc::Rc,
     sync::atomic::{AtomicBool, Ordering},
 };
@@ -17,7 +16,11 @@ use wayland_server::{
 
 use crate::{
     backend::{
-        allocator::{dmabuf::Dmabuf, format::has_alpha, Buffer},
+        allocator::{
+            dmabuf::{DmaBufSyncFlags, Dmabuf, DmabufMapping, DmabufMappingMut},
+            format::has_alpha,
+            Buffer,
+        },
         SwapBuffersError,
     },
     utils::{Buffer as BufferCoords, Physical, Rectangle, Scale, Size, Transform},
@@ -34,80 +37,6 @@ use super::{
     sync::SyncPoint, Bind, DebugFlags, ExportMem, Frame, ImportDma, ImportDmaWl, ImportMem, ImportMemWl,
     Offscreen, Renderer, Texture, TextureFilter, TextureMapping, Unbind,
 };
-
-bitflags::bitflags! {
-    struct DmaBufSyncFlags: std::ffi::c_ulonglong {
-        const READ = 1 << 0;
-        const WRITE = 2 << 0;
-        const START = 0 << 2;
-        const END = 1 << 2;
-    }
-}
-
-#[repr(C)]
-#[allow(non_camel_case_types)]
-struct dma_buf_sync {
-    flags: DmaBufSyncFlags,
-}
-
-struct DmabufIoctlSync {
-    sync: dma_buf_sync,
-}
-
-unsafe impl rustix::ioctl::Ioctl for DmabufIoctlSync {
-    type Output = ();
-
-    const OPCODE: rustix::ioctl::Opcode = rustix::ioctl::Opcode::write::<dma_buf_sync>(b'b', 0);
-
-    const IS_MUTATING: bool = true;
-
-    fn as_ptr(&mut self) -> *mut std::ffi::c_void {
-        &mut self.sync as *mut _ as *mut _
-    }
-
-    unsafe fn output_from_ptr(
-        _out: rustix::ioctl::IoctlOutput,
-        _extract_output: *mut std::ffi::c_void,
-    ) -> rustix::io::Result<Self::Output> {
-        Ok(())
-    }
-}
-
-fn dmabuf_sync_read_start(fd: impl AsFd) -> rustix::io::Result<()> {
-    let ioctl = DmabufIoctlSync {
-        sync: dma_buf_sync {
-            flags: DmaBufSyncFlags::READ | DmaBufSyncFlags::START,
-        },
-    };
-    unsafe { rustix::ioctl::ioctl(fd, ioctl) }
-}
-
-fn dmabuf_sync_read_end(fd: impl AsFd) -> rustix::io::Result<()> {
-    let ioctl = DmabufIoctlSync {
-        sync: dma_buf_sync {
-            flags: DmaBufSyncFlags::READ | DmaBufSyncFlags::END,
-        },
-    };
-    unsafe { rustix::ioctl::ioctl(fd, ioctl) }
-}
-
-fn dmabuf_sync_read_write_start(fd: impl AsFd) -> rustix::io::Result<()> {
-    let ioctl = DmabufIoctlSync {
-        sync: dma_buf_sync {
-            flags: DmaBufSyncFlags::READ | DmaBufSyncFlags::WRITE | DmaBufSyncFlags::START,
-        },
-    };
-    unsafe { rustix::ioctl::ioctl(fd, ioctl) }
-}
-
-fn dmabuf_sync_read_write_end(fd: impl AsFd) -> rustix::io::Result<()> {
-    let ioctl = DmabufIoctlSync {
-        sync: dma_buf_sync {
-            flags: DmaBufSyncFlags::READ | DmaBufSyncFlags::WRITE | DmaBufSyncFlags::END,
-        },
-    };
-    unsafe { rustix::ioctl::ioctl(fd, ioctl) }
-}
 
 lazy_static::lazy_static! {
     static ref SUPPORTED_FORMATS: Vec<drm_fourcc::DrmFourcc> = {
@@ -149,7 +78,7 @@ pub enum PixmanError {
     #[error("The underlying buffer has been destroyed")]
     BufferDestroyed,
     #[error("Io: {0}")]
-    Io(#[from] rustix::io::Errno),
+    Io(#[from] std::io::Error),
     #[error("No target has been bound")]
     NoTarget,
     #[error("The requested operation is not supported")]
@@ -159,10 +88,9 @@ pub enum PixmanError {
 #[derive(Debug)]
 enum PixmanTarget {
     Image {
-        mmap: *mut std::ffi::c_void,
-        len: usize,
         image: Image<'static, 'static>,
         dmabuf: Dmabuf,
+        dmabuf_mapping: DmabufMappingMut,
     },
     RenderBuffer(PixmanRenderBuffer),
 }
@@ -220,32 +148,11 @@ impl Bind<PixmanRenderBuffer> for PixmanRenderer {
     }
 }
 
-impl Drop for PixmanTarget {
-    #[profiling::function]
-    fn drop(&mut self) {
-        match self {
-            PixmanTarget::Image { mmap, len, .. } => unsafe {
-                rustix::mm::munmap(*mmap, *len).unwrap();
-            },
-            PixmanTarget::RenderBuffer(_) => {}
-        }
-    }
-}
-
 #[derive(Debug)]
 pub struct PixmanBuffer {
-    mmap: *mut std::ffi::c_void,
-    len: usize,
     image: Image<'static, 'static>,
     dmabuf: Dmabuf,
-}
-
-impl Drop for PixmanBuffer {
-    fn drop(&mut self) {
-        unsafe {
-            rustix::mm::munmap(self.mmap, self.len).unwrap();
-        }
-    }
+    dmabuf_mapping: DmabufMapping,
 }
 
 #[derive(Debug, Clone)]
@@ -269,21 +176,21 @@ impl From<pixman::Image<'static, 'static>> for PixmanTexture {
 }
 
 struct DmabufReadGuard<'fd> {
-    fd: BorrowedFd<'fd>,
+    dmabuf: &'fd Dmabuf,
 }
 
 impl<'fd> DmabufReadGuard<'fd> {
     #[profiling::function]
-    pub fn new(fd: BorrowedFd<'fd>) -> rustix::io::Result<Self> {
-        dmabuf_sync_read_start(&fd)?;
-        Ok(Self { fd })
+    pub fn new(dmabuf: &'fd Dmabuf) -> std::io::Result<Self> {
+        dmabuf.sync(DmaBufSyncFlags::START | DmaBufSyncFlags::READ)?;
+        Ok(Self { dmabuf })
     }
 }
 
 impl<'fd> Drop for DmabufReadGuard<'fd> {
     #[profiling::function]
     fn drop(&mut self) {
-        if let Err(err) = dmabuf_sync_read_end(&self.fd) {
+        if let Err(err) = self.dmabuf.sync(DmaBufSyncFlags::END | DmaBufSyncFlags::READ) {
             tracing::warn!(?err, "failed to end sync read");
         }
     }
@@ -316,9 +223,7 @@ impl PixmanTexture {
     #[profiling::function]
     fn accessor<'l>(&'l self) -> Result<TextureAccessor<'l>, PixmanError> {
         let guard = match self {
-            PixmanTexture::Image(image) => {
-                Some(DmabufReadGuard::new(image.dmabuf.handles().next().unwrap())?)
-            }
+            PixmanTexture::Image(image) => Some(DmabufReadGuard::new(&image.dmabuf)?),
             PixmanTexture::Buffer { wl_buffer, .. } => {
                 wl_buffer.upgrade().map_err(|_| PixmanError::BufferDestroyed)?;
                 None
@@ -754,7 +659,9 @@ impl<'frame> PixmanFrame<'frame> {
         }
 
         if let PixmanTarget::Image { dmabuf, .. } = self.renderer.target.as_ref().unwrap() {
-            dmabuf_sync_read_write_end(dmabuf.handles().next().unwrap())?;
+            dmabuf
+                .sync(DmaBufSyncFlags::END | DmaBufSyncFlags::READ | DmaBufSyncFlags::WRITE)
+                .map_err(PixmanError::Io)?;
         }
 
         Ok(SyncPoint::signaled())
@@ -832,7 +739,9 @@ impl Renderer for PixmanRenderer {
         dst_transform: Transform,
     ) -> Result<PixmanFrame<'_>, Self::Error> {
         if let PixmanTarget::Image { dmabuf, .. } = self.target.as_ref().ok_or(PixmanError::NoTarget)? {
-            dmabuf_sync_read_write_start(dmabuf.handles().next().unwrap())?;
+            dmabuf
+                .sync(DmaBufSyncFlags::START | DmaBufSyncFlags::READ | DmaBufSyncFlags::WRITE)
+                .map_err(PixmanError::Io)?;
         }
         Ok(PixmanFrame {
             renderer: self,
@@ -1104,42 +1013,24 @@ impl ImportDma for PixmanRenderer {
         let format = pixman::FormatCode::try_from(format.code)
             .map_err(|_| PixmanError::UnsupportedDrmFourcc(format.code))?;
 
-        let fd = dmabuf.handles().next().expect("already checked");
+        let dmabuf_mapping = dmabuf.map_readable().map_err(|_| PixmanError::ImportFailed)?;
         let stride = dmabuf.strides().next().expect("already checked");
-        let offset = dmabuf.offsets().next().expect("already checked");
 
-        let len = (stride * size.h as u32) as usize;
-        let ptr = unsafe {
-            rustix::mm::mmap(
-                std::ptr::null_mut(),
-                len,
-                rustix::mm::ProtFlags::READ,
-                rustix::mm::MapFlags::SHARED,
-                fd,
-                offset as u64,
-            )
-        }?;
-
-        let image = unsafe {
+        let image: Image<'_, '_> = unsafe {
             pixman::Image::from_raw_mut(
                 format,
                 size.w as usize,
                 size.h as usize,
-                ptr as *mut _,
+                dmabuf_mapping.as_ptr() as *mut _,
                 stride as usize,
                 false,
             )
-        };
-
-        let Ok(image) = image else {
-            let _ = unsafe { rustix::mm::munmap(ptr, len) };
-            return Err(PixmanError::ImportFailed);
-        };
+        }
+        .map_err(|_| PixmanError::ImportFailed)?;
 
         Ok(PixmanTexture::Image(Rc::new(PixmanBuffer {
             image,
-            mmap: ptr,
-            len,
+            dmabuf_mapping,
             dmabuf: dmabuf.clone(),
         })))
     }
@@ -1183,43 +1074,25 @@ impl Bind<Dmabuf> for PixmanRenderer {
         let format = pixman::FormatCode::try_from(format.code)
             .map_err(|_| PixmanError::UnsupportedDrmFourcc(format.code))?;
 
-        let fd = target.handles().next().expect("already checked");
+        let mut dmabuf_mapping = target.map_writable().map_err(|_| PixmanError::ImportFailed)?;
         let stride = target.strides().next().expect("already checked");
-        let offset = target.offsets().next().expect("already checked");
-
-        let len = (stride * size.h as u32) as usize;
-        let ptr = unsafe {
-            rustix::mm::mmap(
-                std::ptr::null_mut(),
-                len,
-                rustix::mm::ProtFlags::READ | rustix::mm::ProtFlags::WRITE,
-                rustix::mm::MapFlags::SHARED,
-                fd,
-                offset as u64,
-            )
-        }?;
 
         let image = unsafe {
             pixman::Image::from_raw_mut(
                 format,
                 size.w as usize,
                 size.h as usize,
-                ptr as *mut _,
+                dmabuf_mapping.as_mut_ptr() as *mut _,
                 stride as usize,
                 false,
             )
-        };
-
-        let Ok(image) = image else {
-            let _ = unsafe { rustix::mm::munmap(ptr, len) };
-            return Err(PixmanError::ImportFailed);
-        };
+        }
+        .map_err(|_| PixmanError::ImportFailed)?;
 
         self.target = Some(PixmanTarget::Image {
+            dmabuf: target.clone(),
+            dmabuf_mapping,
             image,
-            mmap: ptr,
-            len,
-            dmabuf: target,
         });
 
         Ok(())
