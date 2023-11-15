@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     ops::Deref,
     os::unix::io::{AsFd, BorrowedFd},
     rc::Rc,
@@ -178,6 +179,12 @@ impl PixmanTarget {
 #[derive(Debug)]
 pub struct PixmanRenderBuffer(pixman::Image<'static, 'static>);
 
+impl From<pixman::Image<'static, 'static>> for PixmanRenderBuffer {
+    fn from(value: pixman::Image<'static, 'static>) -> Self {
+        Self(value)
+    }
+}
+
 impl Offscreen<PixmanRenderBuffer> for PixmanRenderer {
     #[profiling::function]
     fn create_buffer(
@@ -189,7 +196,7 @@ impl Offscreen<PixmanRenderBuffer> for PixmanRenderer {
             FormatCode::try_from(format).map_err(|_| PixmanError::UnsupportedDrmFourcc(format))?;
         let image = pixman::Image::new(format_code, size.w as usize, size.h as usize, true)
             .map_err(|_| PixmanError::Unsupported)?;
-        Ok(PixmanRenderBuffer(image))
+        Ok(PixmanRenderBuffer::from(image))
     }
 }
 
@@ -253,6 +260,12 @@ pub enum PixmanTexture {
         flipped: bool,
     },
     Raw(Rc<Image<'static, 'static>>),
+}
+
+impl From<pixman::Image<'static, 'static>> for PixmanTexture {
+    fn from(value: pixman::Image<'static, 'static>) -> Self {
+        Self::Raw(Rc::new(value))
+    }
 }
 
 struct DmabufReadGuard<'fd> {
