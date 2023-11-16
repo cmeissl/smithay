@@ -256,13 +256,12 @@ impl Dmabuf {
 
     /// Map this dmabuf readable
     pub fn map_readable(&self) -> Result<DmabufMapping, DmabufMappingFailed> {
-        self.map(rustix::mm::ProtFlags::READ).map(DmabufMapping)
+        self.map(rustix::mm::ProtFlags::READ)
     }
 
     /// Map this dmabuf read/writeable
-    pub fn map_writable(&self) -> Result<DmabufMappingMut, DmabufMappingFailed> {
+    pub fn map_writable(&self) -> Result<DmabufMapping, DmabufMappingFailed> {
         self.map(rustix::mm::ProtFlags::READ | rustix::mm::ProtFlags::WRITE)
-            .map(DmabufMappingMut)
     }
 
     /// Sync access to this dmabuf
@@ -273,7 +272,7 @@ impl Dmabuf {
         Ok(())
     }
 
-    fn map(&self, flags: rustix::mm::ProtFlags) -> Result<DmabufMappingInner, DmabufMappingFailed> {
+    fn map(&self, prot: rustix::mm::ProtFlags) -> Result<DmabufMapping, DmabufMappingFailed> {
         if self.num_planes() != 1 {
             return Err(DmabufMappingFailed::UnsupportedNumberOfPlanes);
         }
@@ -288,14 +287,14 @@ impl Dmabuf {
             rustix::mm::mmap(
                 std::ptr::null_mut(),
                 len,
-                flags,
+                prot,
                 rustix::mm::MapFlags::SHARED,
                 &plane.fd,
                 plane.offset as u64,
             )
         }
         .map_err(std::io::Error::from)?;
-        Ok(DmabufMappingInner { flags, len, ptr })
+        Ok(DmabufMapping { len, ptr })
     }
 }
 
@@ -336,57 +335,28 @@ struct dma_buf_sync {
 
 type DmaBufSync = WriteOpcode<b'b', 0, dma_buf_sync>;
 
-#[derive(Debug)]
-struct DmabufMappingInner {
-    ptr: *mut std::ffi::c_void,
-    len: usize,
-    flags: rustix::mm::ProtFlags,
-}
-
-impl DmabufMappingInner {
-    fn data(&self) -> &[u8] {
-        unsafe { std::slice::from_raw_parts(self.ptr as *const u8, self.len) }
-    }
-
-    fn data_mut(&mut self) -> &mut [u8] {
-        debug_assert!(self.flags.contains(rustix::mm::ProtFlags::WRITE));
-        unsafe { std::slice::from_raw_parts_mut(self.ptr as *mut u8, self.len) }
-    }
-}
-
-impl Drop for DmabufMappingInner {
-    fn drop(&mut self) {
-        let _ = unsafe { rustix::mm::munmap(self.ptr, self.len) };
-    }
-}
-
 /// A mapping into a [`Dmabuf`]
 #[derive(Debug)]
-pub struct DmabufMapping(DmabufMappingInner);
+pub struct DmabufMapping {
+    ptr: *mut std::ffi::c_void,
+    len: usize,
+}
 
-/// A mutable mapping into a [`Dmabuf`]
-#[derive(Debug)]
-pub struct DmabufMappingMut(DmabufMappingInner);
+impl DmabufMapping {
+    /// Access the raw pointer of the mapping
+    pub fn ptr(&self) -> *mut std::ffi::c_void {
+        self.ptr
+    }
 
-impl Deref for DmabufMappingMut {
-    type Target = [u8];
-
-    fn deref(&self) -> &Self::Target {
-        self.0.data()
+    /// Access the length of the mapping
+    pub fn len(&self) -> usize {
+        self.len
     }
 }
 
-impl DerefMut for DmabufMappingMut {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.0.data_mut()
-    }
-}
-
-impl Deref for DmabufMapping {
-    type Target = [u8];
-
-    fn deref(&self) -> &Self::Target {
-        self.0.data()
+impl Drop for DmabufMapping {
+    fn drop(&mut self) {
+        let _ = unsafe { rustix::mm::munmap(self.ptr, self.len) };
     }
 }
 

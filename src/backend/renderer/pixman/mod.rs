@@ -17,7 +17,7 @@ use wayland_server::{
 use crate::{
     backend::{
         allocator::{
-            dmabuf::{DmaBufSyncFlags, Dmabuf, DmabufMapping, DmabufMappingMut},
+            dmabuf::{DmaBufSyncFlags, Dmabuf, DmabufMapping},
             format::has_alpha,
             Buffer,
         },
@@ -90,7 +90,9 @@ enum PixmanTarget {
     Image {
         image: Image<'static, 'static>,
         dmabuf: Dmabuf,
-        dmabuf_mapping: DmabufMappingMut,
+        // SAFETY: The image uses the mapping, so this has to be
+        // dropped after the image
+        _dmabuf_mapping: DmabufMapping,
     },
     RenderBuffer(PixmanRenderBuffer),
 }
@@ -152,7 +154,9 @@ impl Bind<PixmanRenderBuffer> for PixmanRenderer {
 pub struct PixmanBuffer {
     image: Image<'static, 'static>,
     dmabuf: Dmabuf,
-    dmabuf_mapping: DmabufMapping,
+    // SAFETY: The image uses the mapping, so this has to be
+    // dropped after the image
+    _dmabuf_mapping: DmabufMapping,
 }
 
 #[derive(Debug, Clone)]
@@ -1014,15 +1018,19 @@ impl ImportDma for PixmanRenderer {
             .map_err(|_| PixmanError::UnsupportedDrmFourcc(format.code))?;
 
         let dmabuf_mapping = dmabuf.map_readable().map_err(|_| PixmanError::ImportFailed)?;
-        let stride = dmabuf.strides().next().expect("already checked");
+        let stride = dmabuf.strides().next().expect("already checked") as usize;
+
+        if dmabuf_mapping.len() < stride * size.h as usize {
+            return Err(PixmanError::ImportFailed);
+        }
 
         let image: Image<'_, '_> = unsafe {
             pixman::Image::from_raw_mut(
                 format,
                 size.w as usize,
                 size.h as usize,
-                dmabuf_mapping.as_ptr() as *mut _,
-                stride as usize,
+                dmabuf_mapping.ptr() as *mut u32,
+                stride,
                 false,
             )
         }
@@ -1030,7 +1038,7 @@ impl ImportDma for PixmanRenderer {
 
         Ok(PixmanTexture::Image(Rc::new(PixmanBuffer {
             image,
-            dmabuf_mapping,
+            _dmabuf_mapping: dmabuf_mapping,
             dmabuf: dmabuf.clone(),
         })))
     }
@@ -1074,16 +1082,20 @@ impl Bind<Dmabuf> for PixmanRenderer {
         let format = pixman::FormatCode::try_from(format.code)
             .map_err(|_| PixmanError::UnsupportedDrmFourcc(format.code))?;
 
-        let mut dmabuf_mapping = target.map_writable().map_err(|_| PixmanError::ImportFailed)?;
-        let stride = target.strides().next().expect("already checked");
+        let dmabuf_mapping = target.map_writable().map_err(|_| PixmanError::ImportFailed)?;
+        let stride = target.strides().next().expect("already checked") as usize;
+
+        if dmabuf_mapping.len() < stride * size.h as usize {
+            return Err(PixmanError::ImportFailed);
+        }
 
         let image = unsafe {
             pixman::Image::from_raw_mut(
                 format,
                 size.w as usize,
                 size.h as usize,
-                dmabuf_mapping.as_mut_ptr() as *mut _,
-                stride as usize,
+                dmabuf_mapping.ptr() as *mut u32,
+                stride,
                 false,
             )
         }
@@ -1091,7 +1103,7 @@ impl Bind<Dmabuf> for PixmanRenderer {
 
         self.target = Some(PixmanTarget::Image {
             dmabuf: target.clone(),
-            dmabuf_mapping,
+            _dmabuf_mapping: dmabuf_mapping,
             image,
         });
 
