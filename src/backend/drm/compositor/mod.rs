@@ -168,9 +168,9 @@ use crate::{
 
 use super::{DrmDeviceFd, DrmSurface, Framebuffer, PlaneClaim, PlaneInfo, Planes};
 
+pub mod dumb;
 mod elements;
 pub mod gbm;
-pub mod dumb;
 
 use elements::*;
 

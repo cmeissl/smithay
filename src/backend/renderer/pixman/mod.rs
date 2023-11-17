@@ -588,7 +588,7 @@ impl<'frame> Frame for PixmanFrame<'frame> {
 
         let has_alpha = DrmFourcc::try_from(src_image.format())
             .ok()
-            .map(|format| has_alpha(format))
+            .map(has_alpha)
             .unwrap_or(true);
 
         let op = if has_alpha {
@@ -715,10 +715,10 @@ impl PixmanRenderer {
         let stride = dmabuf.strides().next().expect("already checked") as usize;
         let expected_len = stride * size.h as usize;
 
-        if dmabuf_mapping.len() < expected_len {
+        if dmabuf_mapping.length() < expected_len {
             return Err(PixmanError::IncompleteBuffer {
                 expected: expected_len,
-                actual: dmabuf_mapping.len(),
+                actual: dmabuf_mapping.length(),
             });
         }
 
@@ -823,7 +823,7 @@ impl ImportMem for PixmanRenderer {
         Ok(PixmanTexture(Rc::new(PixmanImage {
             buffer: None,
             dmabuf: None,
-            image: image,
+            image,
             _flipped: flipped,
         })))
     }
@@ -840,7 +840,7 @@ impl ImportMem for PixmanRenderer {
         }
 
         let stride = texture.0.image.stride();
-        let expected_len = stride * texture.0.image.height() as usize;
+        let expected_len = stride * texture.0.image.height();
 
         if data.len() < expected_len {
             return Err(PixmanError::IncompleteBuffer {
@@ -963,7 +963,7 @@ impl ExportMem for PixmanRenderer {
                 .map_err(|_| PixmanError::Unsupported)?;
         copy_image.composite32(
             Operation::Src,
-            &accessor.image,
+            accessor.image,
             None,
             region.loc.x,
             region.loc.y,
@@ -986,7 +986,7 @@ impl ExportMem for PixmanRenderer {
         Ok(unsafe {
             std::slice::from_raw_parts(
                 data.as_ptr() as *const u8,
-                data.len() * std::mem::size_of::<u32>(),
+                std::mem::size_of_val(data),
             )
         })
     }

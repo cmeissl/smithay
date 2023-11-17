@@ -19,7 +19,6 @@ use crate::utils::{Buffer as BufferCoords, Size};
 #[cfg(feature = "wayland_frontend")]
 use crate::wayland::compositor::{Blocker, BlockerState};
 use std::hash::{Hash, Hasher};
-use std::ops::{Deref, DerefMut};
 use std::os::unix::io::{AsFd, BorrowedFd, OwnedFd};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Weak};
@@ -319,6 +318,7 @@ bitflags::bitflags! {
         /// Read from the dmabuf
         const READ = 1 << 0;
         /// Write to the dmabuf
+        #[allow(clippy::identity_op)]
         const WRITE = 2 << 0;
         /// Start of read/write
         const START = 0 << 2;
@@ -349,7 +349,7 @@ impl DmabufMapping {
     }
 
     /// Access the length of the mapping
-    pub fn len(&self) -> usize {
+    pub fn length(&self) -> usize {
         self.len
     }
 }
