@@ -279,7 +279,7 @@ impl Dmabuf {
 
         let plane = &self.0.planes[0];
         if plane.modifier != Modifier::Linear {
-            return Err(DmabufMappingFailed::UnsupportedModifier);
+            return Err(DmabufMappingFailed::UnsupportedModifier(plane.modifier));
         }
 
         let len = (plane.stride * self.0.size.h as u32) as usize;
@@ -307,7 +307,7 @@ pub enum DmabufMappingFailed {
     UnsupportedNumberOfPlanes,
     /// Only linear buffers are supported
     #[error("Only linear buffers are supported")]
-    UnsupportedModifier,
+    UnsupportedModifier(Modifier),
     /// Io error during map operation
     Io(#[from] std::io::Error),
 }
