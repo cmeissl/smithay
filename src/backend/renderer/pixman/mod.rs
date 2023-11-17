@@ -1,3 +1,4 @@
+//! Implementation of the rendering traits using pixman
 use std::{
     collections::HashSet,
     ops::Deref,
@@ -7,21 +8,14 @@ use std::{
 
 use drm_fourcc::{DrmFormat, DrmFourcc, DrmModifier};
 use pixman::{Filter, FormatCode, Image, Operation, Repeat};
-use thiserror::Error;
 use tracing::warn;
-use wayland_server::{
-    protocol::{wl_buffer, wl_shm},
-    Weak,
-};
+use wayland_server::{protocol::wl_buffer, Resource, Weak};
 
 use crate::{
-    backend::{
-        allocator::{
-            dmabuf::{DmaBufSyncFlags, Dmabuf, DmabufMapping},
-            format::has_alpha,
-            Buffer,
-        },
-        SwapBuffersError,
+    backend::allocator::{
+        dmabuf::{DmaBufSyncFlags, Dmabuf, DmabufMapping},
+        format::has_alpha,
+        Buffer,
     },
     utils::{Buffer as BufferCoords, Physical, Rectangle, Scale, Size, Transform},
     wayland::{compositor::SurfaceData, shm},
@@ -37,6 +31,10 @@ use super::{
     sync::SyncPoint, Bind, DebugFlags, ExportMem, Frame, ImportDma, ImportDmaWl, ImportMem, ImportMemWl,
     Offscreen, Renderer, Texture, TextureFilter, TextureMapping, Unbind,
 };
+
+mod error;
+
+pub use error::*;
 
 lazy_static::lazy_static! {
     static ref SUPPORTED_FORMATS: Vec<drm_fourcc::DrmFourcc> = {
@@ -63,49 +61,22 @@ lazy_static::lazy_static! {
     };
 }
 
-#[derive(Debug, Error)]
-pub enum PixmanError {
-    #[error("Only single plane dmabuf are supported")]
-    UnsupportedDmabufPlaneCount,
-    #[error("The drm fourcc {0:?} is not supported")]
-    UnsupportedDrmFourcc(DrmFourcc),
-    #[error("The drm modifier {0:?} is not supported, only Linear is supported")]
-    UnsupportedDrmModifier(DrmModifier),
-    #[error("The shm format {0:?} is not supported")]
-    UnsupportedShmFormat(wl_shm::Format),
-    #[error("Import failed")]
-    ImportFailed,
-    #[error("The underlying buffer has been destroyed")]
-    BufferDestroyed,
-    #[error("Io: {0}")]
-    Io(#[from] std::io::Error),
-    #[error("No target has been bound")]
-    NoTarget,
-    #[error("The requested operation is not supported")]
-    Unsupported,
-}
-
 #[derive(Debug)]
 enum PixmanTarget {
-    Image {
-        image: Image<'static, 'static>,
-        dmabuf: Dmabuf,
-        // SAFETY: The image uses the mapping, so this has to be
-        // dropped after the image
-        _dmabuf_mapping: DmabufMapping,
-    },
+    Image(PixmanImage),
     RenderBuffer(PixmanRenderBuffer),
 }
 
 impl PixmanTarget {
     fn image(&self) -> &pixman::Image<'static, 'static> {
         match self {
-            PixmanTarget::Image { image, .. } => image,
+            PixmanTarget::Image(buffer) => &buffer.image,
             PixmanTarget::RenderBuffer(render_buffer) => &render_buffer.0,
         }
     }
 }
 
+/// Offscreen render buffer
 #[derive(Debug)]
 pub struct PixmanRenderBuffer(pixman::Image<'static, 'static>);
 
@@ -123,7 +94,7 @@ impl Offscreen<PixmanRenderBuffer> for PixmanRenderer {
         size: Size<i32, BufferCoords>,
     ) -> Result<PixmanRenderBuffer, <Self as Renderer>::Error> {
         let format_code =
-            FormatCode::try_from(format).map_err(|_| PixmanError::UnsupportedDrmFourcc(format))?;
+            FormatCode::try_from(format).map_err(|_| PixmanError::UnsupportedPixelFormat(format))?;
         let image = pixman::Image::new(format_code, size.w as usize, size.h as usize, true)
             .map_err(|_| PixmanError::Unsupported)?;
         Ok(PixmanRenderBuffer::from(image))
@@ -151,31 +122,56 @@ impl Bind<PixmanRenderBuffer> for PixmanRenderer {
 }
 
 #[derive(Debug)]
-pub struct PixmanBuffer {
-    image: Image<'static, 'static>,
+struct PixmanDmabufMapping {
     dmabuf: Dmabuf,
-    // SAFETY: The image uses the mapping, so this has to be
-    // dropped after the image
-    _dmabuf_mapping: DmabufMapping,
+    _mapping: DmabufMapping,
 }
 
-#[derive(Debug, Clone)]
-pub enum PixmanTexture {
-    Image(Rc<PixmanBuffer>),
-    Buffer {
-        wl_buffer: Weak<wl_buffer::WlBuffer>,
-        image: Rc<Image<'static, 'static>>,
-    },
-    Memory {
-        image: Rc<Image<'static, 'static>>,
-        flipped: bool,
-    },
-    Raw(Rc<Image<'static, 'static>>),
+#[derive(Debug)]
+struct PixmanImage {
+    buffer: Option<Weak<wl_buffer::WlBuffer>>,
+    dmabuf: Option<PixmanDmabufMapping>,
+    image: Image<'static, 'static>,
+    _flipped: bool, /* TODO: What about flipped textures? */
 }
+
+impl PixmanImage {
+    #[inline]
+    fn image(&self) -> &Image<'static, 'static> {
+        &self.image
+    }
+
+    #[profiling::function]
+    fn accessor<'l>(&'l self) -> Result<TextureAccessor<'l>, PixmanError> {
+        if let Some(buffer) = self.buffer.as_ref() {
+            buffer.upgrade().map_err(|_| PixmanError::WlBufferDestroyed)?;
+        }
+
+        let guard = if let Some(mapping) = self.dmabuf.as_ref() {
+            Some(DmabufReadGuard::new(&mapping.dmabuf)?)
+        } else {
+            None
+        };
+
+        Ok(TextureAccessor {
+            image: self.image(),
+            _guard: guard,
+        })
+    }
+}
+
+/// A handle to a pixman texture
+#[derive(Debug, Clone)]
+pub struct PixmanTexture(Rc<PixmanImage>);
 
 impl From<pixman::Image<'static, 'static>> for PixmanTexture {
-    fn from(value: pixman::Image<'static, 'static>) -> Self {
-        Self::Raw(Rc::new(value))
+    fn from(image: pixman::Image<'static, 'static>) -> Self {
+        Self(Rc::new(PixmanImage {
+            buffer: None,
+            dmabuf: None,
+            _flipped: false,
+            image,
+        }))
     }
 }
 
@@ -216,29 +212,12 @@ impl<'l> Deref for TextureAccessor<'l> {
 impl PixmanTexture {
     #[inline]
     fn image(&self) -> &Image<'static, 'static> {
-        match self {
-            PixmanTexture::Image(image) => &image.image,
-            PixmanTexture::Buffer { image, .. } => &*image,
-            PixmanTexture::Memory { image, .. } => &*image,
-            PixmanTexture::Raw(image) => &*image,
-        }
+        self.0.image()
     }
 
     #[profiling::function]
     fn accessor<'l>(&'l self) -> Result<TextureAccessor<'l>, PixmanError> {
-        let guard = match self {
-            PixmanTexture::Image(image) => Some(DmabufReadGuard::new(&image.dmabuf)?),
-            PixmanTexture::Buffer { wl_buffer, .. } => {
-                wl_buffer.upgrade().map_err(|_| PixmanError::BufferDestroyed)?;
-                None
-            }
-            PixmanTexture::Memory { .. } => None,
-            PixmanTexture::Raw(_) => None,
-        };
-        Ok(TextureAccessor {
-            image: self.image(),
-            _guard: guard,
-        })
+        self.0.accessor()
     }
 }
 
@@ -256,6 +235,7 @@ impl Texture for PixmanTexture {
     }
 }
 
+/// Handle to the currently rendered frame during [`PixmanRenderer::render`](Renderer::render).
 #[derive(Debug)]
 pub struct PixmanFrame<'frame> {
     renderer: &'frame mut PixmanRenderer,
@@ -420,7 +400,7 @@ impl<'frame> Frame for PixmanFrame<'frame> {
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
         src_transform: Transform,
-        alpha: f32,
+        _alpha: f32, /* TODO: Use for alpha mask */
     ) -> Result<(), Self::Error> {
         let src_image = texture.accessor()?;
 
@@ -662,10 +642,13 @@ impl<'frame> PixmanFrame<'frame> {
             return Ok(SyncPoint::signaled());
         }
 
-        if let PixmanTarget::Image { dmabuf, .. } = self.renderer.target.as_ref().unwrap() {
-            dmabuf
-                .sync(DmaBufSyncFlags::END | DmaBufSyncFlags::READ | DmaBufSyncFlags::WRITE)
-                .map_err(PixmanError::Io)?;
+        if let Some(PixmanTarget::Image(image)) = self.renderer.target.as_ref() {
+            if let Some(mapping) = image.dmabuf.as_ref() {
+                mapping
+                    .dmabuf
+                    .sync(DmaBufSyncFlags::END | DmaBufSyncFlags::READ | DmaBufSyncFlags::WRITE)
+                    .map_err(PixmanError::Access)?;
+            }
         }
 
         Ok(SyncPoint::signaled())
@@ -685,6 +668,7 @@ impl<'frame> Drop for PixmanFrame<'frame> {
     }
 }
 
+/// A renderer utilizing pixman
 #[derive(Debug)]
 pub struct PixmanRenderer {
     target: Option<PixmanTarget>,
@@ -695,6 +679,7 @@ pub struct PixmanRenderer {
 }
 
 impl PixmanRenderer {
+    /// Creates a new pixman renderer
     pub fn new() -> Result<Self, PixmanError> {
         let tint = pixman::Solid::new([0.0, 0.3, 0.0, 0.2]).map_err(|_| PixmanError::Unsupported)?;
         Ok(Self {
@@ -703,6 +688,60 @@ impl PixmanRenderer {
             upscale_filter: TextureFilter::Linear,
             debug_flags: DebugFlags::empty(),
             tint,
+        })
+    }
+}
+
+impl PixmanRenderer {
+    fn import_dmabuf(&mut self, dmabuf: Dmabuf, writeable: bool) -> Result<PixmanImage, PixmanError> {
+        if dmabuf.num_planes() != 1 {
+            return Err(PixmanError::UnsupportedNumberOfPlanes);
+        }
+
+        let size = dmabuf.size();
+        let format = dmabuf.format();
+
+        if format.modifier != DrmModifier::Linear {
+            return Err(PixmanError::UnsupportedModifier(format.modifier));
+        }
+        let format = pixman::FormatCode::try_from(format.code)
+            .map_err(|_| PixmanError::UnsupportedPixelFormat(format.code))?;
+
+        let dmabuf_mapping = if writeable {
+            dmabuf.map_writable()
+        } else {
+            dmabuf.map_readable()
+        }?;
+        let stride = dmabuf.strides().next().expect("already checked") as usize;
+        let expected_len = stride * size.h as usize;
+
+        if dmabuf_mapping.len() < expected_len {
+            return Err(PixmanError::IncompleteBuffer {
+                expected: expected_len,
+                actual: dmabuf_mapping.len(),
+            });
+        }
+
+        let image: Image<'_, '_> = unsafe {
+            pixman::Image::from_raw_mut(
+                format,
+                size.w as usize,
+                size.h as usize,
+                dmabuf_mapping.ptr() as *mut u32,
+                stride,
+                false,
+            )
+        }
+        .map_err(|_| PixmanError::ImportFailed)?;
+
+        Ok(PixmanImage {
+            buffer: None,
+            dmabuf: Some(PixmanDmabufMapping {
+                dmabuf,
+                _mapping: dmabuf_mapping,
+            }),
+            image,
+            _flipped: false,
         })
     }
 }
@@ -742,10 +781,13 @@ impl Renderer for PixmanRenderer {
         output_size: Size<i32, Physical>,
         dst_transform: Transform,
     ) -> Result<PixmanFrame<'_>, Self::Error> {
-        if let PixmanTarget::Image { dmabuf, .. } = self.target.as_ref().ok_or(PixmanError::NoTarget)? {
-            dmabuf
-                .sync(DmaBufSyncFlags::START | DmaBufSyncFlags::READ | DmaBufSyncFlags::WRITE)
-                .map_err(PixmanError::Io)?;
+        if let Some(PixmanTarget::Image(image)) = self.target.as_ref() {
+            if let Some(mapping) = image.dmabuf.as_ref() {
+                mapping
+                    .dmabuf
+                    .sync(DmaBufSyncFlags::START | DmaBufSyncFlags::READ | DmaBufSyncFlags::WRITE)
+                    .map_err(PixmanError::Access)?;
+            }
         }
         Ok(PixmanFrame {
             renderer: self,
@@ -769,7 +811,7 @@ impl ImportMem for PixmanRenderer {
         flipped: bool,
     ) -> Result<<Self as Renderer>::TextureId, <Self as Renderer>::Error> {
         let format =
-            pixman::FormatCode::try_from(format).map_err(|_| PixmanError::UnsupportedDrmFourcc(format))?;
+            pixman::FormatCode::try_from(format).map_err(|_| PixmanError::UnsupportedPixelFormat(format))?;
         let image = pixman::Image::new(format, size.w as usize, size.h as usize, false)
             .map_err(|_| PixmanError::Unsupported)?;
         image.data().copy_from_slice(unsafe {
@@ -778,10 +820,12 @@ impl ImportMem for PixmanRenderer {
                 data.len() / std::mem::size_of::<u32>(),
             )
         });
-        Ok(PixmanTexture::Memory {
-            image: Rc::new(image),
-            flipped,
-        })
+        Ok(PixmanTexture(Rc::new(PixmanImage {
+            buffer: None,
+            dmabuf: None,
+            image: image,
+            _flipped: flipped,
+        })))
     }
 
     #[profiling::function]
@@ -791,25 +835,35 @@ impl ImportMem for PixmanRenderer {
         data: &[u8],
         region: Rectangle<i32, BufferCoords>,
     ) -> Result<(), <Self as Renderer>::Error> {
-        let PixmanTexture::Memory { image, .. } = texture else {
+        if texture.0.buffer.is_some() || texture.0.dmabuf.is_some() {
             return Err(PixmanError::ImportFailed);
-        };
+        }
+
+        let stride = texture.0.image.stride();
+        let expected_len = stride * texture.0.image.height() as usize;
+
+        if data.len() < expected_len {
+            return Err(PixmanError::IncompleteBuffer {
+                expected: expected_len,
+                actual: data.len(),
+            });
+        }
 
         let src_image = unsafe {
             // SAFETY: As we are never going to write to this image
             // it is safe to cast the passed slice to a mut pointer
             pixman::Image::from_raw_mut(
-                image.format(),
-                image.width(),
-                image.height(),
+                texture.0.image.format(),
+                texture.0.image.width(),
+                texture.0.image.height(),
                 data.as_ptr() as *mut _,
-                image.stride(),
+                stride,
                 false,
             )
         }
         .map_err(|_| PixmanError::ImportFailed)?;
 
-        image.composite32(
+        texture.0.image.composite32(
             Operation::Src,
             &src_image,
             None,
@@ -831,10 +885,11 @@ impl ImportMem for PixmanRenderer {
     }
 }
 
+/// Texture mapping of a pixman texture
 #[derive(Debug)]
-pub struct PixmanTextureMapping(pixman::Image<'static, 'static>);
+pub struct PixmanMapping(pixman::Image<'static, 'static>);
 
-impl Texture for PixmanTextureMapping {
+impl Texture for PixmanMapping {
     fn width(&self) -> u32 {
         self.0.width() as u32
     }
@@ -848,14 +903,14 @@ impl Texture for PixmanTextureMapping {
     }
 }
 
-impl TextureMapping for PixmanTextureMapping {
+impl TextureMapping for PixmanMapping {
     fn flipped(&self) -> bool {
         false
     }
 }
 
 impl ExportMem for PixmanRenderer {
-    type TextureMapping = PixmanTextureMapping;
+    type TextureMapping = PixmanMapping;
 
     #[profiling::function]
     fn copy_framebuffer(
@@ -863,30 +918,34 @@ impl ExportMem for PixmanRenderer {
         region: Rectangle<i32, BufferCoords>,
         format: DrmFourcc,
     ) -> Result<Self::TextureMapping, <Self as Renderer>::Error> {
-        let target_image = self
-            .target
-            .as_ref()
-            .map(|target| target.image())
-            .ok_or(PixmanError::NoTarget)?;
         let format_code =
-            pixman::FormatCode::try_from(format).map_err(|_| PixmanError::UnsupportedDrmFourcc(format))?;
+            pixman::FormatCode::try_from(format).map_err(|_| PixmanError::UnsupportedPixelFormat(format))?;
         let copy_image =
             pixman::Image::new(format_code, region.size.w as usize, region.size.h as usize, false)
                 .map_err(|_| PixmanError::Unsupported)?;
-        copy_image.composite32(
-            Operation::Src,
-            &target_image,
-            None,
-            region.loc.x,
-            region.loc.y,
-            0,
-            0,
-            0,
-            0,
-            region.size.w,
-            region.size.h,
-        );
-        Ok(PixmanTextureMapping(copy_image))
+
+        if let Some(target) = self.target.as_ref() {
+            let _accessor = if let PixmanTarget::Image(image) = target {
+                Some(image.accessor()?)
+            } else {
+                None
+            };
+            copy_image.composite32(
+                Operation::Src,
+                target.image(),
+                None,
+                region.loc.x,
+                region.loc.y,
+                0,
+                0,
+                0,
+                0,
+                region.size.w,
+                region.size.h,
+            );
+        }
+
+        Ok(PixmanMapping(copy_image))
     }
 
     #[profiling::function]
@@ -898,7 +957,7 @@ impl ExportMem for PixmanRenderer {
     ) -> Result<Self::TextureMapping, Self::Error> {
         let accessor = texture.accessor()?;
         let format_code =
-            pixman::FormatCode::try_from(format).map_err(|_| PixmanError::UnsupportedDrmFourcc(format))?;
+            pixman::FormatCode::try_from(format).map_err(|_| PixmanError::UnsupportedPixelFormat(format))?;
         let copy_image =
             pixman::Image::new(format_code, region.size.w as usize, region.size.h as usize, false)
                 .map_err(|_| PixmanError::Unsupported)?;
@@ -915,7 +974,7 @@ impl ExportMem for PixmanRenderer {
             region.size.w,
             region.size.h,
         );
-        Ok(PixmanTextureMapping(copy_image))
+        Ok(PixmanMapping(copy_image))
     }
 
     #[profiling::function]
@@ -974,9 +1033,9 @@ impl ImportMemWl for PixmanRenderer {
         let image = shm::with_buffer_contents(buffer, |ptr, _, data| {
             let format = FormatCode::try_from(
                 shm::shm_format_to_fourcc(data.format)
-                    .ok_or(PixmanError::UnsupportedShmFormat(data.format))?,
+                    .ok_or(PixmanError::UnsupportedWlPixelFormat(data.format))?,
             )
-            .map_err(|_| PixmanError::UnsupportedShmFormat(data.format))?;
+            .map_err(|_| PixmanError::UnsupportedWlPixelFormat(data.format))?;
             let image = unsafe {
                 // SAFETY: We guarantee that this image is only used for reading,
                 // so it is safe to cast the ptr to *mut
@@ -991,9 +1050,13 @@ impl ImportMemWl for PixmanRenderer {
             }
             .map_err(|_| PixmanError::ImportFailed)?;
             std::result::Result::<_, PixmanError>::Ok(image)
-        })
-        .map_err(|_| PixmanError::ImportFailed)??;
-        Ok(PixmanTexture::Raw(Rc::new(image)))
+        })??;
+        Ok(PixmanTexture(Rc::new(PixmanImage {
+            buffer: Some(buffer.downgrade()),
+            dmabuf: None,
+            image,
+            _flipped: false,
+        })))
     }
 }
 
@@ -1004,43 +1067,7 @@ impl ImportDma for PixmanRenderer {
         dmabuf: &Dmabuf,
         _damage: Option<&[Rectangle<i32, BufferCoords>]>,
     ) -> Result<<Self as Renderer>::TextureId, <Self as Renderer>::Error> {
-        if dmabuf.num_planes() != 1 {
-            return Err(PixmanError::UnsupportedDmabufPlaneCount);
-        }
-
-        let size = dmabuf.size();
-        let format = dmabuf.format();
-
-        if format.modifier != DrmModifier::Linear {
-            return Err(PixmanError::UnsupportedDrmModifier(format.modifier));
-        }
-        let format = pixman::FormatCode::try_from(format.code)
-            .map_err(|_| PixmanError::UnsupportedDrmFourcc(format.code))?;
-
-        let dmabuf_mapping = dmabuf.map_readable().map_err(|_| PixmanError::ImportFailed)?;
-        let stride = dmabuf.strides().next().expect("already checked") as usize;
-
-        if dmabuf_mapping.len() < stride * size.h as usize {
-            return Err(PixmanError::ImportFailed);
-        }
-
-        let image: Image<'_, '_> = unsafe {
-            pixman::Image::from_raw_mut(
-                format,
-                size.w as usize,
-                size.h as usize,
-                dmabuf_mapping.ptr() as *mut u32,
-                stride,
-                false,
-            )
-        }
-        .map_err(|_| PixmanError::ImportFailed)?;
-
-        Ok(PixmanTexture::Image(Rc::new(PixmanBuffer {
-            image,
-            _dmabuf_mapping: dmabuf_mapping,
-            dmabuf: dmabuf.clone(),
-        })))
+        Ok(PixmanTexture(Rc::new(self.import_dmabuf(dmabuf.clone(), false)?)))
     }
 
     fn dmabuf_formats(&self) -> Box<dyn Iterator<Item = drm_fourcc::DrmFormat>> {
@@ -1069,44 +1096,7 @@ impl Unbind for PixmanRenderer {
 impl Bind<Dmabuf> for PixmanRenderer {
     #[profiling::function]
     fn bind(&mut self, target: Dmabuf) -> Result<(), <Self as Renderer>::Error> {
-        if target.num_planes() != 1 {
-            return Err(PixmanError::UnsupportedDmabufPlaneCount);
-        }
-
-        let size = target.size();
-        let format = target.format();
-
-        if format.modifier != DrmModifier::Linear {
-            return Err(PixmanError::UnsupportedDrmModifier(format.modifier));
-        }
-        let format = pixman::FormatCode::try_from(format.code)
-            .map_err(|_| PixmanError::UnsupportedDrmFourcc(format.code))?;
-
-        let dmabuf_mapping = target.map_writable().map_err(|_| PixmanError::ImportFailed)?;
-        let stride = target.strides().next().expect("already checked") as usize;
-
-        if dmabuf_mapping.len() < stride * size.h as usize {
-            return Err(PixmanError::ImportFailed);
-        }
-
-        let image = unsafe {
-            pixman::Image::from_raw_mut(
-                format,
-                size.w as usize,
-                size.h as usize,
-                dmabuf_mapping.ptr() as *mut u32,
-                stride,
-                false,
-            )
-        }
-        .map_err(|_| PixmanError::ImportFailed)?;
-
-        self.target = Some(PixmanTarget::Image {
-            dmabuf: target.clone(),
-            _dmabuf_mapping: dmabuf_mapping,
-            image,
-        });
-
+        self.target = Some(PixmanTarget::Image(self.import_dmabuf(target, true)?));
         Ok(())
     }
 
@@ -1120,11 +1110,5 @@ impl Bind<Dmabuf> for PixmanRenderer {
             };
         }
         Some(DMABUF_FORMATS.clone())
-    }
-}
-
-impl From<PixmanError> for SwapBuffersError {
-    fn from(value: PixmanError) -> Self {
-        SwapBuffersError::ContextLost(Box::new(value))
     }
 }
