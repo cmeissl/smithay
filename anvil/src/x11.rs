@@ -408,7 +408,7 @@ macro_rules! impl_renderer_internal {
     (@call_import_mem_wl $name:ident; $($x:ident),*) => {
         smithay::backend::renderer::ImportMemWl::$name($($x),*)
     };
-    (@import $name:ident $error:ident $texture_id:ident ImportEgl $($import:ident)*; $($(#[$meta:meta])* $body:ident ($field:ty { type Error = $other_error:ty; type TextureId = $other_texture_id:ty; type Frame = $other_frame:ty; })),* $(,)?) => {
+    (@import $name:ident $error:ident $texture_id:ident $(#[$import_attr:meta])* ImportEgl $($(#[$other_import_attr:meta])* $other_import:ident)*; $($(#[$meta:meta])* $body:ident ($field:ty { type Error = $other_error:ty; type TextureId = $other_texture_id:ty; type Frame = $other_frame:ty; })),* $(,)?) => {
         impl smithay::backend::renderer::ImportEgl for $name {
             fn bind_wl_display(
                 &mut self,
@@ -473,9 +473,9 @@ macro_rules! impl_renderer_internal {
             }
         }
 
-        $crate::impl_renderer_internal!(@import $name $error $texture_id $($import)*; $($(#[$meta])* $body ($field { type Error = $other_error; type TextureId = $other_texture_id; type Frame = $other_frame; })),*);
+        $crate::impl_renderer_internal!(@import $name $error $texture_id $($(#[$other_import_attr])* $other_import)*; $($(#[$meta])* $body ($field { type Error = $other_error; type TextureId = $other_texture_id; type Frame = $other_frame; })),*);
     };
-    (@import $name:ident $error:ident $texture_id:ident ImportDma $($import:ident)*; $($(#[$meta:meta])* $body:ident ($field:ty { type Error = $other_error:ty; type TextureId = $other_texture_id:ty; type Frame = $other_frame:ty; })),* $(,)?) => {
+    (@import $name:ident $error:ident $texture_id:ident $(#[$import_attr:meta])* ImportDma $($(#[$other_import_attr:meta])* $other_import:ident)*; $($(#[$meta:meta])* $body:ident ($field:ty { type Error = $other_error:ty; type TextureId = $other_texture_id:ty; type Frame = $other_frame:ty; })),* $(,)?) => {
         impl smithay::backend::renderer::ImportDma for $name {
             fn import_dmabuf(
                 &mut self,
@@ -523,9 +523,9 @@ macro_rules! impl_renderer_internal {
             }
         }
 
-        $crate::impl_renderer_internal!(@import $name $error $texture_id $($import)*; $($(#[$meta])* $body ($field { type Error = $other_error; type TextureId = $other_texture_id; type Frame = $other_frame; })),*);
+        $crate::impl_renderer_internal!(@import $name $error $texture_id $($(#[$other_import_attr])* $other_import)*; $($(#[$meta])* $body ($field { type Error = $other_error; type TextureId = $other_texture_id; type Frame = $other_frame; })),*);
     };
-    (@import $name:ident $error:ident $texture_id:ident ImportDmaWl $($import:ident)*; $($(#[$meta:meta])* $body:ident ($field:ty { type Error = $other_error:ty; type TextureId = $other_texture_id:ty; type Frame = $other_frame:ty; })),* $(,)?) => {
+    (@import $name:ident $error:ident $texture_id:ident $(#[$import_attr:meta])* ImportDmaWl $($(#[$other_import_attr:meta])* $other_import:ident)*; $($(#[$meta:meta])* $body:ident ($field:ty { type Error = $other_error:ty; type TextureId = $other_texture_id:ty; type Frame = $other_frame:ty; })),* $(,)?) => {
         impl smithay::backend::renderer::ImportDmaWl for $name {
             fn import_dma_buffer(
                 &mut self,
@@ -548,9 +548,9 @@ macro_rules! impl_renderer_internal {
             }
         }
 
-        $crate::impl_renderer_internal!(@import $name $error $texture_id $($import)*; $($(#[$meta])* $body ($field { type Error = $other_error; type TextureId = $other_texture_id; type Frame = $other_frame; })),*);
+        $crate::impl_renderer_internal!(@import $name $error $texture_id $($(#[$other_import_attr])* $other_import)*; $($(#[$meta])* $body ($field { type Error = $other_error; type TextureId = $other_texture_id; type Frame = $other_frame; })),*);
     };
-    (@import $name:ident $error:ident $texture_id:ident ImportMem $($import:ident)*; $($(#[$meta:meta])* $body:ident ($field:ty { type Error = $other_error:ty; type TextureId = $other_texture_id:ty; type Frame = $other_frame:ty; })),* $(,)?) => {
+    (@import $name:ident $error:ident $texture_id:ident $(#[$import_attr:meta])* ImportMem $($(#[$other_import_attr:meta])* $other_import:ident)*; $($(#[$meta:meta])* $body:ident ($field:ty { type Error = $other_error:ty; type TextureId = $other_texture_id:ty; type Frame = $other_frame:ty; })),* $(,)?) => {
         impl smithay::backend::renderer::ImportMem for $name {
             fn import_memory(
                 &mut self,
@@ -612,9 +612,9 @@ macro_rules! impl_renderer_internal {
             }
         }
 
-        $crate::impl_renderer_internal!(@import $name $error $texture_id $($import)*; $($(#[$meta])* $body ($field { type Error = $other_error; type TextureId = $other_texture_id; type Frame = $other_frame; })),*);
+        $crate::impl_renderer_internal!(@import $name $error $texture_id $($(#[$other_import_attr])* $other_import)*; $($(#[$meta])* $body ($field { type Error = $other_error; type TextureId = $other_texture_id; type Frame = $other_frame; })),*);
     };
-    (@import $name:ident $error:ident $texture_id:ident ImportMemWl $($import:ident)*; $($(#[$meta:meta])* $body:ident ($field:ty { type Error = $other_error:ty; type TextureId = $other_texture_id:ty; type Frame = $other_frame:ty; })),* $(,)?) => {
+    (@import $name:ident $error:ident $texture_id:ident $(#[$import_attr:meta])* ImportMemWl $($(#[$other_import_attr:meta])* $other_import:ident)*; $($(#[$meta:meta])* $body:ident ($field:ty { type Error = $other_error:ty; type TextureId = $other_texture_id:ty; type Frame = $other_frame:ty; })),* $(,)?) => {
         impl smithay::backend::renderer::ImportMemWl for $name {
             fn import_shm_buffer(
                 &mut self,
@@ -652,7 +652,7 @@ macro_rules! impl_renderer_internal {
             }
         }
 
-        $crate::impl_renderer_internal!(@import $name $error $texture_id $($import)*; $($(#[$meta])* $body ($field { type Error = $other_error; type TextureId = $other_texture_id; type Frame = $other_frame; })),*);
+        $crate::impl_renderer_internal!(@import $name $error $texture_id $($(#[$other_import_attr])* $other_import)*; $($(#[$meta])* $body ($field { type Error = $other_error; type TextureId = $other_texture_id; type Frame = $other_frame; })),*);
     };
     (@import $name:ident $error:ident $texture_id:ident; $($(#[$meta:meta])* $body:ident ($field:ty { type Error = $other_error:ty; type TextureId = $other_texture_id:ty; type Frame = $other_frame:ty; })),* $(,)?) => {};
 }
@@ -663,14 +663,14 @@ macro_rules! impl_renderer {
             $(#[$texture_id_attr:meta])* type TextureId = $texture_id:ident;
             $(#[$frame_attr:meta])* type Frame = $frame:ident<$frame_lifetime:lifetime>;
         };
-        Imports=[$($import:ident,)*];
+        Imports=[$($(#[$import_attr:meta])* $import:ident,)*];
         $($tail:tt)*) => {
         $crate::impl_renderer_internal!(@enum $(#[$attr])* $vis $name; $($tail)*);
         $crate::impl_renderer_internal!(@error $(#[$error_attr])* $vis $error; $($tail)*);
         $crate::impl_renderer_internal!(@texture_id $(#[$texture_id_attr])* $vis $texture_id $error; $($tail)*);
         $crate::impl_renderer_internal!(@frame $(#[$frame_attr])* $vis $frame<$frame_lifetime> $error $texture_id; $($tail)*);
         $crate::impl_renderer_internal!(@renderer $vis $name $error $texture_id $frame<$frame_lifetime>; $($tail)*);
-        $crate::impl_renderer_internal!(@import $name $error $texture_id $($import)*; $($tail)*);
+        $crate::impl_renderer_internal!(@import $name $error $texture_id $($(#[$import_attr])* $import)*; $($tail)*);
     };
 }
 
@@ -684,7 +684,14 @@ impl_renderer! {
         #[derive(Debug)]
         type Frame = AutoRendererFrame<'frame>;
     };
-    Imports=[ImportDma, ImportDmaWl, ImportEgl, ImportMem, ImportMemWl,];
+    Imports=[
+        ImportDma,
+        ImportDmaWl, 
+        #[cfg(feature = "egl")]
+        ImportEgl,
+        ImportMem,
+        ImportMemWl,
+    ];
     Gles(GlesRenderer {
         type Error = GlesError;
         type TextureId = GlesTexture;
