@@ -247,81 +247,18 @@ pub struct PixmanFrame<'frame> {
     finished: AtomicBool,
 }
 
-impl<'frame> Frame for PixmanFrame<'frame> {
-    type Error = PixmanError;
-
-    type TextureId = PixmanTexture;
-
-    fn id(&self) -> usize {
-        0
-    }
-
-    #[profiling::function]
-    fn clear(&mut self, color: [f32; 4], at: &[Rectangle<i32, Physical>]) -> Result<(), Self::Error> {
-        let target_image = self
-            .renderer
-            .target
-            .as_ref()
-            .map(|target| target.image())
-            .expect("frame without target");
-
-        let solid = pixman::Solid::new(color).map_err(|_| PixmanError::Unsupported)?;
-
-        let mut clip_region =
-            pixman::Region32::init_rect(0, 0, self.output_size.w as u32, self.output_size.h as u32);
-
-        let at = at
-            .iter()
-            .map(|rect| {
-                let rect = self.transform.transform_rect_in(*rect, &self.size);
-
-                let p1 = rect.loc;
-                let p2 = p1 + rect.size.to_point();
-                pixman::Box32 {
-                    x1: p1.x,
-                    y1: p1.y,
-                    x2: p2.x,
-                    y2: p2.y,
-                }
-            })
-            .collect::<Vec<_>>();
-        let at = pixman::Region32::init_rects(&at);
-        clip_region = clip_region.intersect(&at);
-
-        target_image.set_clip_region32(Some(&clip_region)).unwrap();
-
-        target_image.composite32(
-            Operation::Src,
-            &solid,
-            None,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            target_image.width() as i32,
-            target_image.height() as i32,
-        );
-
-        target_image.set_clip_region32(None).unwrap();
-
-        Ok(())
-    }
-
-    #[profiling::function]
-    fn draw_solid(
+impl<'frame> PixmanFrame<'frame> {
+    fn draw_solid_color(
         &mut self,
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
         color: [f32; 4],
-    ) -> Result<(), Self::Error> {
-        let target_image = self
-            .renderer
-            .target
-            .as_ref()
-            .map(|target| target.image())
-            .expect("frame without target");
+        op: Operation,
+        debug: DebugFlags,
+    ) -> Result<(), PixmanError> {
+        let Some(target_image) = self.renderer.target.as_ref().map(|target| target.image()) else {
+            return Ok(());
+        };
 
         let solid = pixman::Solid::new(color).map_err(|_| PixmanError::Unsupported)?;
 
@@ -351,14 +288,8 @@ impl<'frame> Frame for PixmanFrame<'frame> {
 
         target_image.set_clip_region32(Some(&clip_region)).unwrap();
 
-        let operation = if color[3] == 1f32 {
-            Operation::Src
-        } else {
-            Operation::Over
-        };
-
         target_image.composite32(
-            operation,
+            op,
             &solid,
             None,
             0,
@@ -371,7 +302,7 @@ impl<'frame> Frame for PixmanFrame<'frame> {
             target_image.height() as i32,
         );
 
-        if self.renderer.debug_flags.contains(DebugFlags::TINT) {
+        if debug.contains(DebugFlags::TINT) {
             target_image.composite32(
                 Operation::Over,
                 &self.renderer.tint,
@@ -391,6 +322,42 @@ impl<'frame> Frame for PixmanFrame<'frame> {
 
         Ok(())
     }
+}
+
+impl<'frame> Frame for PixmanFrame<'frame> {
+    type Error = PixmanError;
+
+    type TextureId = PixmanTexture;
+
+    fn id(&self) -> usize {
+        0
+    }
+
+    #[profiling::function]
+    fn clear(&mut self, color: [f32; 4], at: &[Rectangle<i32, Physical>]) -> Result<(), Self::Error> {
+        self.draw_solid_color(
+            Rectangle::from_loc_and_size((0, 0), self.size),
+            at,
+            color,
+            Operation::Src,
+            DebugFlags::empty(),
+        )
+    }
+
+    #[profiling::function]
+    fn draw_solid(
+        &mut self,
+        dst: Rectangle<i32, Physical>,
+        damage: &[Rectangle<i32, Physical>],
+        color: [f32; 4],
+    ) -> Result<(), Self::Error> {
+        let op = if color[3] == 1f32 {
+            Operation::Src
+        } else {
+            Operation::Over
+        };
+        self.draw_solid_color(dst, damage, color, op, self.renderer.debug_flags)
+    }
 
     #[profiling::function]
     fn render_texture_from_to(
@@ -402,14 +369,11 @@ impl<'frame> Frame for PixmanFrame<'frame> {
         src_transform: Transform,
         alpha: f32,
     ) -> Result<(), Self::Error> {
-        let src_image = texture.accessor()?;
+        let Some(target_image) = self.renderer.target.as_ref().map(|target| target.image()) else {
+            return Ok(());
+        };
 
-        let target_image = self
-            .renderer
-            .target
-            .as_ref()
-            .map(|target| target.image())
-            .expect("frame without target");
+        let src_image = texture.accessor()?;
 
         let dst_loc = dst.loc;
         let dst = self.transform.transform_rect_in(dst, &self.size);
@@ -498,7 +462,6 @@ impl<'frame> Frame for PixmanFrame<'frame> {
                 transform = transform.translate(-dst.loc.x, -dst.loc.y, false).unwrap();
 
                 // scale to src image size
-
                 transform = transform.scale(scale.x, scale.y, false).unwrap();
 
                 let (cos, sin, x, y) = match image_transform {
