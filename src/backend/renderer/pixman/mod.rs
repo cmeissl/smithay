@@ -400,7 +400,7 @@ impl<'frame> Frame for PixmanFrame<'frame> {
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
         src_transform: Transform,
-        _alpha: f32, /* TODO: Use for alpha mask */
+        alpha: f32,
     ) -> Result<(), Self::Error> {
         let src_image = texture.accessor()?;
 
@@ -597,8 +597,24 @@ impl<'frame> Frame for PixmanFrame<'frame> {
             Operation::Src
         };
 
+        let mask = if alpha != 1f32 {
+            Some(pixman::Solid::new([0f32, 0f32, 0f32, alpha]).map_err(|_| PixmanError::Unsupported)?)
+        } else {
+            None
+        };
+
         target_image.composite32(
-            op, &src_image, None, src_x, src_y, 0, 0, dest_x, dest_y, width, height,
+            op,
+            &src_image,
+            mask.as_deref(),
+            src_x,
+            src_y,
+            0,
+            0,
+            dest_x,
+            dest_y,
+            width,
+            height,
         );
 
         if self.renderer.debug_flags.contains(DebugFlags::TINT) {
@@ -983,12 +999,7 @@ impl ExportMem for PixmanRenderer {
         texture_mapping: &'a Self::TextureMapping,
     ) -> Result<&'a [u8], <Self as Renderer>::Error> {
         let data = texture_mapping.0.data();
-        Ok(unsafe {
-            std::slice::from_raw_parts(
-                data.as_ptr() as *const u8,
-                std::mem::size_of_val(data),
-            )
-        })
+        Ok(unsafe { std::slice::from_raw_parts(data.as_ptr() as *const u8, std::mem::size_of_val(data)) })
     }
 }
 
