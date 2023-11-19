@@ -689,7 +689,22 @@ macro_rules! impl_renderer_internal {
 
         $crate::impl_renderer_internal!(@bind $name $error $texture_id $($(#[$other_bind_attr])* $other_bind,),*; $($(#[$meta])* $body ($field { type Error = $other_error; type TextureId = $other_texture_id; type Frame = $other_frame; })),*);
     };
-    (@bind $name:ident $error:ident $texture_id:ident; $($tail:tt)*) => {};
+    (@bind $name:ident $error:ident $texture_id:ident; $($(#[$meta:meta])* $body:ident ($field:ty { type Error = $other_error:ty; type TextureId = $other_texture_id:ty; type Frame = $other_frame:ty; })),* $(,)?) => {
+        impl smithay::backend::renderer::Unbind for $name {
+            fn unbind(&mut self) -> Result<(), <Self as Renderer>::Error> {
+                match self {
+                    $(
+                        #[allow(unused_doc_comments)]
+                        $(
+                            #[$meta]
+                        )*
+                        Self::$body(x) => smithay::backend::renderer::Unbind::unbind(x).map_err(|err| $error::$body(err))
+                    ),*,
+                    Self::_GenericCatcher(_) => unreachable!(),
+                }
+            }
+        }
+    };
 }
 
 macro_rules! impl_renderer {
@@ -699,7 +714,7 @@ macro_rules! impl_renderer {
             $(#[$frame_attr:meta])* type Frame = $frame:ident<$frame_lifetime:lifetime>;
         };
         Imports=[$($(#[$import_attr:meta])* $import:ident,)*];
-        Binds=[$($(#[$bind_attr:meta])* $bind:ty)*];
+        Binds=[$($(#[$bind_attr:meta])* $bind:ty,)*];
         $($tail:tt)*) => {
         $crate::impl_renderer_internal!(@enum $(#[$attr])* $vis $name; $($tail)*);
         $crate::impl_renderer_internal!(@error $(#[$error_attr])* $vis $error; $($tail)*);
@@ -707,7 +722,7 @@ macro_rules! impl_renderer {
         $crate::impl_renderer_internal!(@frame $(#[$frame_attr])* $vis $frame<$frame_lifetime> $error $texture_id; $($tail)*);
         $crate::impl_renderer_internal!(@renderer $vis $name $error $texture_id $frame<$frame_lifetime>; $($tail)*);
         $crate::impl_renderer_internal!(@import $name $error $texture_id $($(#[$import_attr])* $import)*; $($tail)*);
-        $crate::impl_renderer_internal!(@bind $name $error $texture_id $($(#[$bind_attr])* $bind,),*; $($tail)*);
+        $crate::impl_renderer_internal!(@bind $name $error $texture_id $($(#[$bind_attr])* $bind,)*; $($tail)*);
     };
 }
 
@@ -730,7 +745,7 @@ impl_renderer! {
         ImportMemWl,
     ];
     Binds=[
-        Dmabuf
+        Dmabuf,
     ];
     Gles(GlesRenderer {
         type Error = GlesError;
@@ -742,34 +757,6 @@ impl_renderer! {
         type TextureId = PixmanTexture;
         type Frame = PixmanFrame<'frame>;
     }),
-}
-
-// impl Bind<Dmabuf> for AutoRenderer {
-//     fn bind(&mut self, target: Dmabuf) -> Result<(), <Self as Renderer>::Error> {
-//         match self {
-//             AutoRenderer::Gles(renderer) => renderer.bind(target).map_err(AutoRendererError::Gles),
-//             AutoRenderer::Software(renderer) => renderer.bind(target).map_err(AutoRendererError::Software),
-//             _ => unreachable!(),
-//         }
-//     }
-
-//     fn supported_formats(&self) -> Option<std::collections::HashSet<smithay::backend::allocator::Format>> {
-//         match self {
-//             AutoRenderer::Gles(renderer) => Bind::<Dmabuf>::supported_formats(renderer),
-//             AutoRenderer::Software(renderer) => Bind::<Dmabuf>::supported_formats(renderer),
-//             _ => unreachable!(),
-//         }
-//     }
-// }
-
-impl Unbind for AutoRenderer {
-    fn unbind(&mut self) -> Result<(), <Self as Renderer>::Error> {
-        match self {
-            AutoRenderer::Gles(renderer) => renderer.unbind().map_err(AutoRendererError::Gles),
-            AutoRenderer::Software(renderer) => renderer.unbind().map_err(AutoRendererError::Software),
-            _ => unreachable!(),
-        }
-    }
 }
 
 impl DmabufHandler for AnvilState<X11Data> {
