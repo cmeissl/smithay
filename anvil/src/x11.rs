@@ -24,10 +24,10 @@ use smithay::{
         },
         egl::{EGLContext, EGLDisplay},
         renderer::{
+            auto::auto_renderer,
             damage::OutputDamageTracker,
             element::AsRenderElements,
             gles::{GlesError, GlesFrame, GlesRenderer, GlesTexture},
-            impl_renderer,
             pixman::{PixmanError, PixmanFrame, PixmanRenderer, PixmanTexture},
             Bind, ImportDma, ImportMemWl, Renderer,
         },
@@ -56,23 +56,7 @@ use tracing::{error, info, trace, warn};
 
 pub const OUTPUT_NAME: &str = "x11";
 
-#[derive(Debug)]
-pub struct X11Data {
-    render: bool,
-    mode: Mode,
-    // FIXME: If GlesRenderer is dropped before X11Surface, then the MakeCurrent call inside Gles2Renderer will
-    // fail because the X11Surface is keeping gbm alive.
-    renderer: AutoRenderer,
-    damage_tracker: OutputDamageTracker,
-    surface: X11Surface,
-    dmabuf_state: DmabufState,
-    _dmabuf_global: DmabufGlobal,
-    _dmabuf_default_feedback: DmabufFeedback,
-    #[cfg(feature = "debug")]
-    fps: fps_ticker::Fps,
-}
-
-impl_renderer! {
+auto_renderer! {
     #[derive(Debug)]
     pub AutoRenderer {
         #[derive(Debug)]
@@ -102,7 +86,23 @@ impl_renderer! {
         type Error = PixmanError;
         type TextureId = PixmanTexture;
         type Frame = PixmanFrame<'frame>;
-    }),
+    })
+}
+
+#[derive(Debug)]
+pub struct X11Data {
+    render: bool,
+    mode: Mode,
+    // FIXME: If GlesRenderer is dropped before X11Surface, then the MakeCurrent call inside Gles2Renderer will
+    // fail because the X11Surface is keeping gbm alive.
+    renderer: AutoRenderer,
+    damage_tracker: OutputDamageTracker,
+    surface: X11Surface,
+    dmabuf_state: DmabufState,
+    _dmabuf_global: DmabufGlobal,
+    _dmabuf_default_feedback: DmabufFeedback,
+    #[cfg(feature = "debug")]
+    fps: fps_ticker::Fps,
 }
 
 impl DmabufHandler for AnvilState<X11Data> {
@@ -144,9 +144,25 @@ pub fn run_x11() {
     // Create the gbm device for buffer allocation.
     let device = gbm::Device::new(DeviceFd::from(fd)).expect("Failed to create gbm device");
     // Initialize EGL using the GBM device.
-    let egl = EGLDisplay::new(device.clone()).expect("Failed to create EGLDisplay");
+    let egl = match EGLDisplay::new(device.clone()) {
+        Ok(egl) => Some(egl),
+        Err(err) => {
+            tracing::warn!(%err, "Failed to create EGLDisplay");
+            None
+        }
+    };
     // Create the OpenGL context
-    let context = EGLContext::new(&egl).expect("Failed to create EGLContext");
+    let context = if let Some(egl) = egl.as_ref() {
+        match EGLContext::new(egl) {
+            Ok(context) => Some(context),
+            Err(err) => {
+                tracing::warn!(%err, "Failed to create EGLContext");
+                None
+            }
+        }
+    } else {
+        None
+    };
 
     let window = WindowBuilder::new()
         .title("Anvil")
@@ -183,11 +199,22 @@ pub fn run_x11() {
         None
     };
 
-    // #[cfg_attr(not(feature = "egl"), allow(unused_mut))]
-    // let mut renderer = AutoRenderer::Gles(unsafe { GlesRenderer::new(context) }.expect("Failed to initialize renderer"));
-
     #[cfg_attr(not(feature = "egl"), allow(unused_mut))]
-    let mut renderer = AutoRenderer::Software(PixmanRenderer::new().unwrap());
+    let mut renderer = if std::env::var("ANVIL_FORCE_SOFTWARE").is_ok() {
+        AutoRenderer::Software(PixmanRenderer::new().unwrap()) 
+    } else {
+        if let Some(context) = context {
+            match unsafe { GlesRenderer::new(context) } {
+                Ok(renderer) => AutoRenderer::Gles(renderer),
+                Err(err) => {
+                    tracing::warn!(%err, "Failed to initialize gles renderer");
+                    AutoRenderer::Software(PixmanRenderer::new().unwrap()) 
+                },
+            }
+        } else {
+            AutoRenderer::Software(PixmanRenderer::new().unwrap()) 
+        }
+    };
 
     let modifier = Bind::<Dmabuf>::supported_formats(&renderer)
         .map(|formats| {
