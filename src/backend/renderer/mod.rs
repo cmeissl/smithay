@@ -897,6 +897,75 @@ macro_rules! impl_renderer_internal {
     };
 
     /* Error */
+    (@error $(#[$error_attr:meta])* $vis:vis $error:ident<$($error_lifetime:lifetime),+, $($error_custom:ident),+> $(where $($error_target:ty: $error_bound:tt $(+ $error_additional_bound:tt)*),+)?; $($(#[$meta:meta])* $body:ident ($field:ty { type Error = $other_error:ty; type TextureId = $other_texture_id:ty; type Frame = $other_frame:ty; })),* $(,)?) => {
+        $(#[$error_attr])*
+        $vis enum $error<$($error_lifetime),+, $($error_custom),+>
+        $(where $($error_target: $error_bound $(+ $error_additional_bound)*),+)? {
+            $(
+                $(
+                    #[$meta]
+                )*
+                $body($other_error)
+            ),*,
+            #[doc(hidden)]
+            _GenericCatcher(std::convert::Infallible),
+        }
+
+        impl<$($error_lifetime),+, $($error_custom),+> std::fmt::Display for $error<$($error_lifetime),+, $($error_custom),+>
+        $(where $($error_target: $error_bound $(+ $error_additional_bound)*),+)? {
+            fn fmt(&self, _: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> { todo!() }
+        }
+
+        impl<$($error_lifetime),+, $($error_custom),+> std::error::Error for $error<$($error_lifetime),+, $($error_custom),+>
+        $(where $($error_target: $error_bound $(+ $error_additional_bound)*),+)? {
+
+        }
+    };
+    (@error $(#[$error_attr:meta])* $vis:vis $error:ident<$($error_lifetime:lifetime),+>; $($(#[$meta:meta])* $body:ident ($field:ty { type Error = $other_error:ty; type TextureId = $other_texture_id:ty; type Frame = $other_frame:ty; })),* $(,)?) => {
+        $(#[$error_attr])*
+        $vis enum $error<$($error_lifetime),+> {
+            $(
+                $(
+                    #[$meta]
+                )*
+                $body($other_error)
+            ),*,
+            #[doc(hidden)]
+            _GenericCatcher(std::convert::Infallible),
+        }
+
+        impl<$($error_lifetime),+> std::fmt::Display for $error<$($error_lifetime),+> {
+            fn fmt(&self, _: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> { todo!() }
+        }
+
+        impl<$($error_lifetime),+> std::error::Error for $error<$($error_lifetime),+> {
+
+        }
+    };
+    (@error $(#[$error_attr:meta])* $vis:vis $error:ident<$($error_custom:ident),+> $(where $($error_target:ty: $error_bound:tt $(+ $error_additional_bound:tt)*),+)?; $($(#[$meta:meta])* $body:ident ($field:ty { type Error = $other_error:ty; type TextureId = $other_texture_id:ty; type Frame = $other_frame:ty; })),* $(,)?) => {
+        $(#[$error_attr])*
+        $vis enum $error<$($error_custom),+>
+        $(where $($error_target: $error_bound $(+ $error_additional_bound)*),+)? {
+            $(
+                $(
+                    #[$meta]
+                )*
+                $body($other_error)
+            ),*,
+            #[doc(hidden)]
+            _GenericCatcher(std::convert::Infallible),
+        }
+
+        impl<$($error_custom),+> std::fmt::Display for $error<$($error_custom),+>
+        $(where $($error_target: $error_bound $(+ $error_additional_bound)*),+)? {
+            fn fmt(&self, _: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> { todo!() }
+        }
+
+        impl<$($error_custom),+> std::error::Error for $error<$($error_custom),+>
+        $(where $($error_target: $error_bound $(+ $error_additional_bound)*),+)? {
+
+        }
+    };
     (@error $(#[$error_attr:meta])* $vis:vis $error:ident; $($(#[$meta:meta])* $body:ident ($field:ty { type Error = $other_error:ty; type TextureId = $other_texture_id:ty; type Frame = $other_frame:ty; })),* $(,)?) => {
         $(#[$error_attr])*
         $vis enum $error {
@@ -923,20 +992,7 @@ macro_rules! impl_renderer_internal {
     (@call_texture $name:ident; $($x:ident),*) => {
         $crate::backend::renderer::Texture::$name($($x),*)
     };
-    (@texture_id $(#[$texture_id_attr:meta])* $vis:vis $texture_id:ident $error:ident; $($(#[$meta:meta])* $body:ident ($field:ty { type Error = $other_error:ty; type TextureId = $other_texture_id:ty; type Frame = $other_frame:ty; })),* $(,)?) => {
-        $(#[$texture_id_attr])*
-        $vis enum $texture_id {
-            $(
-                $(
-                    #[$meta]
-                )*
-                $body($other_texture_id)
-            ),*,
-            #[doc(hidden)]
-            _GenericCatcher(std::convert::Infallible),
-        }
-
-        impl $crate::backend::renderer::Texture for $texture_id {
+    (@texture_id_impl $error:ident $texture_id:ident; $($(#[$meta:meta])* $body:ident),*) => {
             fn width(&self) -> u32 {
                 match self {
                     $(
@@ -975,6 +1031,77 @@ macro_rules! impl_renderer_internal {
                     Self::_GenericCatcher(_) => unreachable!(),
                 }
             }
+    };
+    (@texture_id $(#[$texture_id_attr:meta])* $vis:vis $error:ident $texture_id:ident<$($texture_id_lifetime:lifetime),+, $($texture_id_custom:ident),+> $(where $($texture_id_target:ty: $texture_id_bound:tt $(+ $texture_id_additional_bound:tt)*),+)?; $($(#[$meta:meta])* $body:ident ($field:ty { type Error = $other_error:ty; type TextureId = $other_texture_id:ty; type Frame = $other_frame:ty; })),* $(,)?) => {
+        $(#[$texture_id_attr])*
+        $vis enum $texture_id<$($texture_id_lifetime),+, $($texture_id_custom),+>
+        $(where $($texture_id_target: $texture_id_bound $(+ $texture_id_additional_bound)*),+)? {
+            $(
+                $(
+                    #[$meta]
+                )*
+                $body($other_texture_id)
+            ),*,
+            #[doc(hidden)]
+            _GenericCatcher(std::convert::Infallible),
+        }
+
+        impl<$($texture_id_lifetime),+, $($texture_id_custom),+> $crate::backend::renderer::Texture for $texture_id<$($texture_id_lifetime),+, $($texture_id_custom),+>
+        $(where $($texture_id_target: $texture_id_bound $(+ $texture_id_additional_bound)*),+)? {
+            $crate::impl_renderer_internal!(@texture_id_impl $error $texture_id; $($(#[$meta])* $body),*);
+        }
+    };
+    (@texture_id $(#[$texture_id_attr:meta])* $vis:vis $error:ident $texture_id:ident<$($texture_id_lifetime:lifetime),+>; $($(#[$meta:meta])* $body:ident ($field:ty { type Error = $other_error:ty; type TextureId = $other_texture_id:ty; type Frame = $other_frame:ty; })),* $(,)?) => {
+        $(#[$texture_id_attr])*
+        $vis enum $texture_id<$($texture_id_lifetime),+,> {
+            $(
+                $(
+                    #[$meta]
+                )*
+                $body($other_texture_id)
+            ),*,
+            #[doc(hidden)]
+            _GenericCatcher(std::convert::Infallible),
+        }
+
+        impl<$($texture_id_lifetime),+> $crate::backend::renderer::Texture for $texture_id<$($texture_id_lifetime),+> {
+            $crate::impl_renderer_internal!(@texture_id_impl $error $texture_id; $($(#[$meta])* $body),*);
+        }
+    };
+    (@texture_id $(#[$texture_id_attr:meta])* $vis:vis $error:ident $texture_id:ident<$($texture_id_custom:ident),+> $(where $($texture_id_target:ty: $texture_id_bound:tt $(+ $texture_id_additional_bound:tt)*),+)?; $($(#[$meta:meta])* $body:ident ($field:ty { type Error = $other_error:ty; type TextureId = $other_texture_id:ty; type Frame = $other_frame:ty; })),* $(,)?) => {
+        $(#[$texture_id_attr])*
+        $vis enum $texture_id<$($texture_id_custom),+>
+        $(where $($texture_id_target: $texture_id_bound $(+ $texture_id_additional_bound)*),+)? {
+            $(
+                $(
+                    #[$meta]
+                )*
+                $body($other_texture_id)
+            ),*,
+            #[doc(hidden)]
+            _GenericCatcher(std::convert::Infallible),
+        }
+
+        impl<$($texture_id_custom),+> $crate::backend::renderer::Texture for $texture_id<$($texture_id_custom),+>
+        $(where $($texture_id_target: $texture_id_bound $(+ $texture_id_additional_bound)*),+)? {
+            $crate::impl_renderer_internal!(@texture_id_impl $error $texture_id; $($(#[$meta])* $body),*);
+        }
+    };
+    (@texture_id $(#[$texture_id_attr:meta])* $vis:vis $error:ident $texture_id:ident; $($(#[$meta:meta])* $body:ident ($field:ty { type Error = $other_error:ty; type TextureId = $other_texture_id:ty; type Frame = $other_frame:ty; })),* $(,)?) => {
+        $(#[$texture_id_attr])*
+        $vis enum $texture_id {
+            $(
+                $(
+                    #[$meta]
+                )*
+                $body($other_texture_id)
+            ),*,
+            #[doc(hidden)]
+            _GenericCatcher(std::convert::Infallible),
+        }
+
+        impl $crate::backend::renderer::Texture for $texture_id {
+            $crate::impl_renderer_internal!(@texture_id_impl $error $texture_id; $($(#[$meta])* $body),*);
         }
     };
 
@@ -982,23 +1109,7 @@ macro_rules! impl_renderer_internal {
     (@call_frame $name:ident; $($x:ident),*) => {
         $crate::backend::renderer::Frame::$name($($x),*)
     };
-    (@frame $(#[$frame_attr:meta])* $vis:vis $frame:ident<$frame_lifetime:lifetime$(,$additional_frame_lifetime:lifetime)* $(,$frame_custom:ident)*> $error:ident $texture_id:ident; $($(#[$meta:meta])* $body:ident ($field:ty { type Error = $other_error:ty; type TextureId = $other_texture_id:ty; type Frame = $other_frame:ty; })),* $(,)?) => {
-        $(#[$frame_attr])*
-        $vis enum $frame<$frame_lifetime $(,$additional_frame_lifetime)* $(,$frame_custom)*> {
-            $(
-                $(
-                    #[$meta]
-                )*
-                $body($other_frame)
-            ),*,
-            #[doc(hidden)]
-            _GenericCatcher(std::convert::Infallible),
-        }
-
-        impl<$frame_lifetime $(,$additional_frame_lifetime)* $(,$frame_custom)*> $crate::backend::renderer::Frame for $frame<$frame_lifetime $(,$additional_frame_lifetime)* $(,$frame_custom)*> {
-            type Error = $error;
-            type TextureId = $texture_id;
-
+    (@frame_impl $error:ident $texture_id:ident; $($(#[$meta:meta])* $body:ident),*) => {
             fn id(&self) -> usize {
                 match self {
                     $(
@@ -1103,6 +1214,89 @@ macro_rules! impl_renderer_internal {
                     Self::_GenericCatcher(_) => unreachable!(),
                 }
             }
+    };
+    (@frame $(#[$frame_attr:meta])* $vis:vis $frame:ident<$frame_lifetime:lifetime $(,$additional_frame_lifetime:lifetime)* $(,$frame_custom:ident)*> $error:ident$(<$($error_lifetime:lifetime),*, $($error_custom:ident),*>)? $texture_id:ident$(<$($texture_id_lifetime:lifetime),*, $($texture_id_custom:ident),*>)? $(where $($frame_target:ty: $frame_bound:tt $(+ $frame_additional_bound:tt)*),+)?; $($(#[$meta:meta])* $body:ident ($field:ty { type Error = $other_error:ty; type TextureId = $other_texture_id:ty; type Frame = $other_frame:ty; })),* $(,)?) => {
+        $(#[$frame_attr])*
+        $vis enum $frame<$frame_lifetime $(,$additional_frame_lifetime)* $(,$frame_custom)*>
+        $(where $($frame_target: $frame_bound $(+ $frame_additional_bound)*),+)? {
+            $(
+                $(
+                    #[$meta]
+                )*
+                $body($other_frame)
+            ),*,
+            #[doc(hidden)]
+            _GenericCatcher(std::convert::Infallible),
+        }
+
+        impl<$frame_lifetime $(,$additional_frame_lifetime)* $(,$frame_custom)*> $crate::backend::renderer::Frame for $frame<$frame_lifetime $(,$additional_frame_lifetime)* $(,$frame_custom)*>
+        $(where $($frame_target: $frame_bound $(+ $frame_additional_bound)*),+)? {
+            type Error = $error$(<$($error_lifetime),*, $($error_custom),*>)?;
+            type TextureId = $texture_id$(<$($texture_id_lifetime),*, $($texture_id_custom),*>)?;
+
+            $crate::impl_renderer_internal!(@frame_impl $error $texture_id; $($(#[$meta])* $body),*);
+        }
+    };
+    (@frame $(#[$frame_attr:meta])* $vis:vis $frame:ident<$frame_lifetime:lifetime $(,$additional_frame_lifetime:lifetime)*> $error:ident$(<$($error_lifetime:lifetime),*>)? $texture_id:ident$(<$($texture_id_lifetime:lifetime),*>)?; $($(#[$meta:meta])* $body:ident ($field:ty { type Error = $other_error:ty; type TextureId = $other_texture_id:ty; type Frame = $other_frame:ty; })),* $(,)?) => {
+        $(#[$frame_attr])*
+        $vis enum $frame<$frame_lifetime $(,$additional_frame_lifetime)*> {
+            $(
+                $(
+                    #[$meta]
+                )*
+                $body($other_frame)
+            ),*,
+            #[doc(hidden)]
+            _GenericCatcher(std::convert::Infallible),
+        }
+
+        impl<$frame_lifetime $(,$additional_frame_lifetime)*> $crate::backend::renderer::Frame for $frame<$frame_lifetime $(,$additional_frame_lifetime)*> {
+            type Error = $error$(<$($error_lifetime),*>)?;
+            type TextureId = $texture_id$(<$($texture_id_lifetime),*>)?;
+
+            $crate::impl_renderer_internal!(@frame_impl $error $texture_id; $($(#[$meta])* $body),*);
+        }
+    };
+    (@frame $(#[$frame_attr:meta])* $vis:vis $frame:ident<$frame_lifetime:lifetime $(,$frame_custom:ident)*> $error:ident$(<$($error_custom:ident),*>)? $texture_id:ident$(<$($texture_id_custom:ident),*>)? $(where $($frame_target:ty: $frame_bound:tt $(+ $frame_additional_bound:tt)*),+)?; $($(#[$meta:meta])* $body:ident ($field:ty { type Error = $other_error:ty; type TextureId = $other_texture_id:ty; type Frame = $other_frame:ty; })),* $(,)?) => {
+        $(#[$frame_attr])*
+        $vis enum $frame<$frame_lifetime $(,$frame_custom)*>
+        $(where $($frame_target: $frame_bound $(+ $frame_additional_bound)*),+)? {
+            $(
+                $(
+                    #[$meta]
+                )*
+                $body($other_frame)
+            ),*,
+            #[doc(hidden)]
+            _GenericCatcher(std::convert::Infallible),
+        }
+
+        impl<$frame_lifetime $(,$frame_custom)*> $crate::backend::renderer::Frame for $frame<$frame_lifetime $(,$frame_custom)*>
+        $(where $($frame_target: $frame_bound $(+ $frame_additional_bound)*),+)? {
+            type Error = $error$(<$($error_custom),*>)?;
+            type TextureId = $texture_id$(<$($texture_id_custom),*>)?;
+
+            $crate::impl_renderer_internal!(@frame_impl $error $texture_id; $($(#[$meta])* $body),*);
+        }
+    };
+    (@frame $(#[$frame_attr:meta])* $vis:vis $frame:ident<$frame_lifetime:lifetime> $error:ident $texture_id:ident; $($(#[$meta:meta])* $body:ident ($field:ty { type Error = $other_error:ty; type TextureId = $other_texture_id:ty; type Frame = $other_frame:ty; })),* $(,)?) => {
+        $(#[$frame_attr])*
+        $vis enum $frame<$frame_lifetime> {
+            $(
+                $(
+                    #[$meta]
+                )*
+                $body($other_frame)
+            ),*,
+            #[doc(hidden)]
+            _GenericCatcher(std::convert::Infallible),
+        }
+
+        impl<$frame_lifetime> $crate::backend::renderer::Frame for $frame<$frame_lifetime> {
+            type Error = $error;
+            type TextureId = $texture_id;
+
+            $crate::impl_renderer_internal!(@frame_impl $error $texture_id; $($(#[$meta])* $body),*);
         }
     };
 
@@ -1110,11 +1304,7 @@ macro_rules! impl_renderer_internal {
     (@call_renderer $name:ident; $($x:ident),*) => {
         $crate::backend::renderer::Renderer::$name($($x),*)
     };
-    (@renderer_impl $error:ident $texture_id:ident $frame:ident<$frame_lifetime:lifetime $(,$additional_frame_lifetime:lifetime)* $(,$frame_custom:ident)*>; $($(#[$meta:meta])* $body:ident ($field:ty { type Error = $other_error:ty; type TextureId = $other_texture_id:ty; type Frame = $other_frame:ty; })),* $(,)?) => {
-            type Error = $error;
-            type TextureId = $texture_id;
-            type Frame<$frame_lifetime> = $frame<$frame_lifetime $(,$additional_frame_lifetime)* $(,$frame_custom)*> where Self: $frame_lifetime;
-
+    (@renderer_impl $frame:ident $error:ident $texture_id:ident; $($(#[$meta:meta])* $body:ident),*) => {
             fn id(&self) -> usize {
                 match self {
                     $(
@@ -1207,26 +1397,42 @@ macro_rules! impl_renderer_internal {
                 }
             }
     };
-    (@renderer $vis:vis $name:ident<$($lt:lifetime),+, $($custom:ident),+> $error:ident $texture_id:ident $frame:ident<$frame_lifetime:lifetime $(,$additional_frame_lifetime:lifetime)* $(,$frame_custom:ident)*> $(where $($target:ty: $bound:tt $(+ $additional_bound:tt)*),+)?; $($(#[$meta:meta])* $body:ident ($field:ty { type Error = $other_error:ty; type TextureId = $other_texture_id:ty; type Frame = $other_frame:ty; })),* $(,)?) => {
+    (@renderer $vis:vis $name:ident<$($lt:lifetime),+, $($custom:ident),+> $error:ident$(<$($error_lifetime:lifetime),*, $($error_custom:ident),*>)? $texture_id:ident$(<$($texture_id_lifetime:lifetime),*, $($texture_id_custom:ident),*>)? $frame:ident<$frame_lifetime:lifetime $(,$additional_frame_lifetime:lifetime)* $(,$frame_custom:ident)*> $(where $($target:ty: $bound:tt $(+ $additional_bound:tt)*),+)?; $($(#[$meta:meta])* $body:ident ($field:ty { type Error = $other_error:ty; type TextureId = $other_texture_id:ty; type Frame = $other_frame:ty; })),* $(,)?) => {
         impl<$($lt),+, $($custom),+> $crate::backend::renderer::Renderer for $name<$($lt),+, $($custom),+>
         $(where $($target: $bound $(+ $additional_bound)*),+)? {
-            $crate::impl_renderer_internal!(@renderer_impl $error $texture_id $frame<$frame_lifetime $(,$additional_frame_lifetime)* $(,$frame_custom)*>; $($(#[$meta])* $body ($field { type Error = $other_error; type TextureId = $other_texture_id; type Frame = $other_frame; })),*);
+            type Error = $error$(<$($error_lifetime),*, $($error_custom),*>)?;
+            type TextureId = $texture_id$(<$($texture_id_lifetime),*, $($texture_id_custom),*>)?;
+            type Frame<$frame_lifetime> = $frame<$frame_lifetime $(,$additional_frame_lifetime)* $(,$frame_custom)*> where Self: $frame_lifetime;
+
+            $crate::impl_renderer_internal!(@renderer_impl $frame $error $texture_id; $($(#[$meta])* $body),*);
         }
     };
-    (@renderer $vis:vis $name:ident<$($lt:lifetime),+> $error:ident $texture_id:ident $frame:ident<$frame_lifetime:lifetime $(,$additional_frame_lifetime:lifetime)*>; $($(#[$meta:meta])* $body:ident ($field:ty { type Error = $other_error:ty; type TextureId = $other_texture_id:ty; type Frame = $other_frame:ty; })),* $(,)?) => {
+    (@renderer $vis:vis $name:ident<$($lt:lifetime),+> $error:ident$(<$($error_lifetime:lifetime),*>)? $texture_id:ident$(<$($texture_id_lifetime:lifetime),*>)? $frame:ident<$frame_lifetime:lifetime $(,$additional_frame_lifetime:lifetime)*>; $($(#[$meta:meta])* $body:ident ($field:ty { type Error = $other_error:ty; type TextureId = $other_texture_id:ty; type Frame = $other_frame:ty; })),* $(,)?) => {
         impl<$($lt),*> $crate::backend::renderer::Renderer for $name<$($lt),+> {
-            $crate::impl_renderer_internal!(@renderer_impl $error $texture_id $frame<$frame_lifetime $(,$additional_frame_lifetime)*>; $($(#[$meta])* $body ($field { type Error = $other_error; type TextureId = $other_texture_id; type Frame = $other_frame; })),*);
+            type Error = $error$(<$($error_lifetime),*>)?;
+            type TextureId = $texture_id$(<$($texture_id_lifetime),*>)?;
+            type Frame<$frame_lifetime> = $frame<$frame_lifetime $(,$additional_frame_lifetime)*> where Self: $frame_lifetime;
+
+            $crate::impl_renderer_internal!(@renderer_impl $frame $error $texture_id; $($(#[$meta])* $body),*);
         }
     };
-    (@renderer $vis:vis $name:ident<$($custom:ident),+> $error:ident $texture_id:ident $frame:ident<$frame_lifetime:lifetime $(,$frame_custom:ident)*> $(where $($target:ty: $bound:tt $(+ $additional_bound:tt)*),+)?; $($(#[$meta:meta])* $body:ident ($field:ty { type Error = $other_error:ty; type TextureId = $other_texture_id:ty; type Frame = $other_frame:ty; })),* $(,)?) => {
+    (@renderer $vis:vis $name:ident<$($custom:ident),+> $error:ident$(<$($error_custom:ident),*>)? $texture_id:ident$(<$($texture_id_custom:ident),*>)? $frame:ident<$frame_lifetime:lifetime $(,$frame_custom:ident)*> $(where $($target:ty: $bound:tt $(+ $additional_bound:tt)*),+)?; $($(#[$meta:meta])* $body:ident ($field:ty { type Error = $other_error:ty; type TextureId = $other_texture_id:ty; type Frame = $other_frame:ty; })),* $(,)?) => {
         impl<$($custom),+> $crate::backend::renderer::Renderer for $name<$($custom),+>
         $(where $($target: $bound $(+ $additional_bound)*),+)? {
-            $crate::impl_renderer_internal!(@renderer_impl $error $texture_id $frame<$frame_lifetime $(,$frame_custom)*>; $($(#[$meta])* $body ($field { type Error = $other_error; type TextureId = $other_texture_id; type Frame = $other_frame; })),*);
+            type Error = $error$(<$($error_custom),*>)?;
+            type TextureId = $texture_id$(<$($texture_id_custom),*>)?;
+            type Frame<$frame_lifetime> = $frame<$frame_lifetime $(,$frame_custom)*> where Self: $frame_lifetime;
+
+            $crate::impl_renderer_internal!(@renderer_impl $frame $error $texture_id; $($(#[$meta])* $body),*);
         }
     };
-    (@renderer $vis:vis $name:ident $error:ident $texture_id:ident $frame:ident<$frame_lifetime:lifetime >; $($(#[$meta:meta])* $body:ident ($field:ty { type Error = $other_error:ty; type TextureId = $other_texture_id:ty; type Frame = $other_frame:ty; })),* $(,)?) => {
+    (@renderer $vis:vis $name:ident $error:ident $texture_id:ident $frame:ident<$frame_lifetime:lifetime>; $($(#[$meta:meta])* $body:ident ($field:ty { type Error = $other_error:ty; type TextureId = $other_texture_id:ty; type Frame = $other_frame:ty; })),* $(,)?) => {
         impl $crate::backend::renderer::Renderer for $name {
-            $crate::impl_renderer_internal!(@renderer_impl $error $texture_id $frame<$frame_lifetime>; $($(#[$meta])* $body ($field { type Error = $other_error; type TextureId = $other_texture_id; type Frame = $other_frame; })),*);
+            type Error = $error;
+            type TextureId = $texture_id;
+            type Frame<$frame_lifetime> = $frame<$frame_lifetime> where Self: $frame_lifetime;
+
+            $crate::impl_renderer_internal!(@renderer_impl $frame $error $texture_id; $($(#[$meta])* $body),*);
         }
     };
 
@@ -1750,50 +1956,50 @@ macro_rules! impl_renderer_internal {
 #[macro_export]
 macro_rules! impl_renderer {
     ($(#[$attr:meta])* $vis:vis $name:ident<$($lt:lifetime),+, $($custom:ident),+> $(where $($target:ty: $bound:tt $(+ $additional_bound:tt)*),+)? {
-            $(#[$error_attr:meta])* type Error = $error:ident;
-            $(#[$texture_id_attr:meta])* type TextureId = $texture_id:ident;
-            $(#[$frame_attr:meta])* type Frame = $frame:ident<$frame_lifetime:lifetime $(,$additional_frame_lifetime:lifetime)* $(,$frame_custom:ident)*>;
+            $(#[$error_attr:meta])* type Error = $error:ident$(<$($error_lifetime:lifetime),*, $($error_custom:ident),*>)? $(where $($error_target:ty: $error_bound:tt $(+ $error_additional_bound:tt)*),+)?;
+            $(#[$texture_id_attr:meta])* type TextureId = $texture_id:ident$(<$($texture_id_lifetime:lifetime),*, $($texture_id_custom:ident),*>)? $(where $($texture_id_target:ty: $texture_id_bound:tt $(+ $texture_id_additional_bound:tt)*),+)?;
+            $(#[$frame_attr:meta])* type Frame = $frame:ident<$frame_lifetime:lifetime $(,$additional_frame_lifetime:lifetime)* $(,$frame_custom:ident)*> $(where $($frame_target:ty: $frame_bound:tt $(+ $frame_additional_bound:tt)*),+)?;
         };
         Imports=[$($(#[$import_attr:meta])* $import:ident,)*];
         Binds=[$($(#[$bind_attr:meta])* $bind:ty,)*];
         $($tail:tt)*) => {
         $crate::impl_renderer_internal!(@enum $(#[$attr])* $vis $name<$($lt),+, $($custom),+> $(where $($target: $bound $(+ $additional_bound)*),+)?; $($tail)*);
-        $crate::impl_renderer_internal!(@error $(#[$error_attr])* $vis $error; $($tail)*);
-        $crate::impl_renderer_internal!(@texture_id $(#[$texture_id_attr])* $vis $texture_id $error; $($tail)*);
-        $crate::impl_renderer_internal!(@frame $(#[$frame_attr])* $vis $frame<$frame_lifetime $(,$additional_frame_lifetime)* $(,$frame_custom)*> $error $texture_id; $($tail)*);
-        $crate::impl_renderer_internal!(@renderer $vis $name<$($lt),+, $($custom),+> $error $texture_id $frame<$frame_lifetime $(,$additional_frame_lifetime)* $(,$frame_custom)*> $(where $($target: $bound $(+ $additional_bound)*),+)?; $($tail)*);
+        $crate::impl_renderer_internal!(@error $(#[$error_attr])* $vis $error$(<$($error_lifetime),*, $($error_custom),*>)? $(where $($error_target: $error_bound $(+ $error_additional_bound)*),+)?; $($tail)*);
+        $crate::impl_renderer_internal!(@texture_id $(#[$texture_id_attr])* $vis $error $texture_id$(<$($texture_id_lifetime),*, $($texture_id_custom),*>)? $(where $($texture_id_target: $texture_id_bound $(+ $texture_id_additional_bound)*),+)?; $($tail)*);
+        $crate::impl_renderer_internal!(@frame $(#[$frame_attr])* $vis $frame<$frame_lifetime $(,$additional_frame_lifetime)* $(,$frame_custom)*> $error$(<$($error_lifetime),*, $($error_custom),*>)? $texture_id$(<$($texture_id_lifetime),*, $($texture_id_custom),*>)? $(where $($frame_target: $frame_bound $(+ $frame_additional_bound)*),+)?; $($tail)*);
+        $crate::impl_renderer_internal!(@renderer $vis $name<$($lt),+, $($custom),+> $error$(<$($error_lifetime),*, $($error_custom),*>)? $texture_id$(<$($texture_id_lifetime),*, $($texture_id_custom),*>)? $frame<$frame_lifetime $(,$additional_frame_lifetime)* $(,$frame_custom)*> $(where $($target: $bound $(+ $additional_bound)*),+)?; $($tail)*);
         $crate::impl_renderer_internal!(@import $name<$($lt),+, $($custom),+> $error $texture_id $($(#[$import_attr])* $import)*; $(where $($target: $bound $(+ $additional_bound)*),+)?; $($tail)*);
         $crate::impl_renderer_internal!(@bind $name<$($lt),+, $($custom),+> $error $texture_id $($(#[$bind_attr])* $bind,)* $(where $($target: $bound $(+ $additional_bound)*),+)?; $($tail)*);
     };
     ($(#[$attr:meta])* $vis:vis $name:ident<$($lt:lifetime),+> {
-            $(#[$error_attr:meta])* type Error = $error:ident;
-            $(#[$texture_id_attr:meta])* type TextureId = $texture_id:ident;
+            $(#[$error_attr:meta])* type Error = $error:ident$(<$($error_lifetime:lifetime),*>)?;
+            $(#[$texture_id_attr:meta])* type TextureId = $texture_id:ident$(<$($texture_id_lifetime:lifetime),*>)?;
             $(#[$frame_attr:meta])* type Frame = $frame:ident<$frame_lifetime:lifetime $(,$additional_frame_lifetime:lifetime)*>;
         };
         Imports=[$($(#[$import_attr:meta])* $import:ident,)*];
         Binds=[$($(#[$bind_attr:meta])* $bind:ty,)*];
         $($tail:tt)*) => {
         $crate::impl_renderer_internal!(@enum $(#[$attr])* $vis $name<$($lt),+>; $($tail)*);
-        $crate::impl_renderer_internal!(@error $(#[$error_attr])* $vis $error; $($tail)*);
-        $crate::impl_renderer_internal!(@texture_id $(#[$texture_id_attr])* $vis $texture_id $error; $($tail)*);
-        $crate::impl_renderer_internal!(@frame $(#[$frame_attr])* $vis $frame<$frame_lifetime$ (,$additional_frame_lifetime)*> $error $texture_id; $($tail)*);
-        $crate::impl_renderer_internal!(@renderer $vis $name<$($lt),+> $error $texture_id $frame<$frame_lifetime $(,$additional_frame_lifetime)*>; $($tail)*);
+        $crate::impl_renderer_internal!(@error $(#[$error_attr])* $vis $error$(<$($error_lifetime),*>)?; $($tail)*);
+        $crate::impl_renderer_internal!(@texture_id $(#[$texture_id_attr])* $vis $error $texture_id$(<$($texture_id_lifetime),*>)?; $($tail)*);
+        $crate::impl_renderer_internal!(@frame $(#[$frame_attr])* $vis $frame<$frame_lifetime$ (,$additional_frame_lifetime)*> $error$(<$($error_lifetime),*>)? $texture_id$(<$($texture_id_lifetime),*>)?; $($tail)*);
+        $crate::impl_renderer_internal!(@renderer $vis $name<$($lt),+> $error$(<$($error_lifetime),*>)? $texture_id$(<$($texture_id_lifetime),*>)? $frame<$frame_lifetime $(,$additional_frame_lifetime)*>; $($tail)*);
         $crate::impl_renderer_internal!(@import $name<$($lt),+> $error $texture_id $($(#[$import_attr])* $import)*; $($tail)*);
         $crate::impl_renderer_internal!(@bind $name<$($lt),+> $error $texture_id $($(#[$bind_attr])* $bind,)*; $($tail)*);
     };
     ($(#[$attr:meta])* $vis:vis $name:ident<$($custom:ident),+> $(where $($target:ty: $bound:tt $(+ $additional_bound:tt)*),+)? {
-            $(#[$error_attr:meta])* type Error = $error:ident;
-            $(#[$texture_id_attr:meta])* type TextureId = $texture_id:ident;
-            $(#[$frame_attr:meta])* type Frame = $frame:ident<$frame_lifetime:lifetime $(,$frame_custom:ident)*>;
+            $(#[$error_attr:meta])* type Error = $error:ident$(<$($error_custom:ident),*>)? $(where $($error_target:ty: $error_bound:tt $(+ $error_additional_bound:tt)*),+)?;
+            $(#[$texture_id_attr:meta])* type TextureId = $texture_id:ident$(<$($texture_id_custom:ident),*>)? $(where $($texture_id_target:ty: $texture_id_bound:tt $(+ $texture_id_additional_bound:tt)*),+)?;
+            $(#[$frame_attr:meta])* type Frame = $frame:ident<$frame_lifetime:lifetime $(,$frame_custom:ident)*> $(where $($frame_target:ty: $frame_bound:tt $(+ $frame_additional_bound:tt)*),+)?;
         };
         Imports=[$($(#[$import_attr:meta])* $import:ident,)*];
         Binds=[$($(#[$bind_attr:meta])* $bind:ty,)*];
         $($tail:tt)*) => {
         $crate::impl_renderer_internal!(@enum $(#[$attr])* $vis $name<$($custom),+> $(where $($target: $bound $(+ $additional_bound)*),+)?; $($tail)*);
-        $crate::impl_renderer_internal!(@error $(#[$error_attr])* $vis $error; $($tail)*);
-        $crate::impl_renderer_internal!(@texture_id $(#[$texture_id_attr])* $vis $texture_id $error; $($tail)*);
-        $crate::impl_renderer_internal!(@frame $(#[$frame_attr])* $vis $frame<$frame_lifetime $(,$frame_custom)*> $error $texture_id; $($tail)*);
-        $crate::impl_renderer_internal!(@renderer $vis $name<$($custom),+> $error $texture_id $frame<$frame_lifetime $(,$frame_custom)*> $(where $($target: $bound $(+ $additional_bound)*),+)?; $($tail)*);
+        $crate::impl_renderer_internal!(@error $(#[$error_attr])* $vis $error$(<$($error_custom),*>)? $(where $($error_target: $error_bound $(+ $error_additional_bound)*),+)?; $($tail)*);
+        $crate::impl_renderer_internal!(@texture_id $(#[$texture_id_attr])* $vis $error $texture_id$(<$($texture_id_custom),*>)? $(where $($texture_id_target: $texture_id_bound $(+ $texture_id_additional_bound)*),+)?; $($tail)*);
+        $crate::impl_renderer_internal!(@frame $(#[$frame_attr])* $vis $frame<$frame_lifetime $(,$frame_custom)*> $error$(<$($error_custom),*>)? $texture_id$(<$($texture_id_custom),*>)? $(where $($frame_target: $frame_bound $(+ $frame_additional_bound)*),+)?; $($tail)*);
+        $crate::impl_renderer_internal!(@renderer $vis $name<$($custom),+> $error$(<$($error_custom),*>)? $texture_id$(<$($texture_id_custom),*>)? $frame<$frame_lifetime $(,$frame_custom)*> $(where $($target: $bound $(+ $additional_bound)*),+)?; $($tail)*);
         $crate::impl_renderer_internal!(@import $name<$($custom),+> $error $texture_id $($(#[$import_attr])* $import)*; $(where $($target: $bound $(+ $additional_bound)*),+)?; $($tail)*);
         $crate::impl_renderer_internal!(@bind $name<$($custom),+> $error $texture_id $($(#[$bind_attr])* $bind,)* $(where $($target: $bound $(+ $additional_bound)*),+)?; $($tail)*);
     };
@@ -1807,7 +2013,7 @@ macro_rules! impl_renderer {
         $($tail:tt)*) => {
         $crate::impl_renderer_internal!(@enum $(#[$attr])* $vis $name; $($tail)*);
         $crate::impl_renderer_internal!(@error $(#[$error_attr])* $vis $error; $($tail)*);
-        $crate::impl_renderer_internal!(@texture_id $(#[$texture_id_attr])* $vis $texture_id $error; $($tail)*);
+        $crate::impl_renderer_internal!(@texture_id $(#[$texture_id_attr])* $vis $error $texture_id; $($tail)*);
         $crate::impl_renderer_internal!(@frame $(#[$frame_attr])* $vis $frame<$frame_lifetime $(,$additional_frame_lifetime)*> $error $texture_id; $($tail)*);
         $crate::impl_renderer_internal!(@renderer $vis $name $error $texture_id $frame<$frame_lifetime $(,$additional_frame_lifetime)*>; $($tail)*);
         $crate::impl_renderer_internal!(@import $name $error $texture_id $($(#[$import_attr])* $import)*; $($tail)*);
