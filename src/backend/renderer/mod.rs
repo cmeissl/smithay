@@ -840,9 +840,9 @@ pub fn buffer_y_inverted(buffer: &wl_buffer::WlBuffer) -> Option<bool> {
 #[macro_export]
 #[doc(hidden)]
 macro_rules! impl_renderer_internal {
-    (@enum $(#[$attr:meta])* $vis:vis $name:ident; $($(#[$meta:meta])* $body:ident ($field:ty { type Error = $other_error:ty; type TextureId = $other_texture_id:ty; type Frame = $other_frame:ty; })),* $(,)?) => {
+    (@enum $(#[$attr:meta])* $vis:vis $name:ident$(<$($lt:lifetime),*>)?; $($(#[$meta:meta])* $body:ident ($field:ty { type Error = $other_error:ty; type TextureId = $other_texture_id:ty; type Frame = $other_frame:ty; })),* $(,)?) => {
         $(#[$attr])*
-        $vis enum $name {
+        $vis enum $name$(<$($lt),*>)? {
             $(
                 $(
                     #[$meta]
@@ -1060,8 +1060,8 @@ macro_rules! impl_renderer_internal {
             }
         }
     };
-    (@renderer $vis:vis $name:ident $error:ident $texture_id:ident $frame:ident<$frame_lifetime:lifetime>; $($(#[$meta:meta])* $body:ident ($field:ty { type Error = $other_error:ty; type TextureId = $other_texture_id:ty; type Frame = $other_frame:ty; })),* $(,)?) => {
-        impl $crate::backend::renderer::Renderer for $name {
+    (@renderer $vis:vis $name:ident$(<$($lt:lifetime),*>)? $error:ident $texture_id:ident $frame:ident<$frame_lifetime:lifetime>; $($(#[$meta:meta])* $body:ident ($field:ty { type Error = $other_error:ty; type TextureId = $other_texture_id:ty; type Frame = $other_frame:ty; })),* $(,)?) => {
+        impl$(<$($lt),*>)? $crate::backend::renderer::Renderer for $name$(<$($lt),*>)? {
             type Error = $error;
             type TextureId = $texture_id;
             type Frame<$frame_lifetime> = $frame<$frame_lifetime>;
@@ -1174,8 +1174,8 @@ macro_rules! impl_renderer_internal {
     (@call_import_mem_wl $name:ident; $($x:ident),*) => {
         $crate::backend::renderer::ImportMemWl::$name($($x),*)
     };
-    (@import $name:ident $error:ident $texture_id:ident $(#[$import_attr:meta])* ImportEgl $($(#[$other_import_attr:meta])* $other_import:ident)*; $($(#[$meta:meta])* $body:ident ($field:ty { type Error = $other_error:ty; type TextureId = $other_texture_id:ty; type Frame = $other_frame:ty; })),* $(,)?) => {
-        impl $crate::backend::renderer::ImportEgl for $name {
+    (@import $name:ident$(<$($lt:lifetime),*>)? $error:ident $texture_id:ident $(#[$import_attr:meta])* ImportEgl $($(#[$other_import_attr:meta])* $other_import:ident)*; $($(#[$meta:meta])* $body:ident ($field:ty { type Error = $other_error:ty; type TextureId = $other_texture_id:ty; type Frame = $other_frame:ty; })),* $(,)?) => {
+        impl$(<$($lt),*>)? $crate::backend::renderer::ImportEgl for $name$(<$($lt),*>)? {
             fn bind_wl_display(
                 &mut self,
                 display: &$crate::reexports::wayland_server::DisplayHandle,
@@ -1239,10 +1239,10 @@ macro_rules! impl_renderer_internal {
             }
         }
 
-        $crate::impl_renderer_internal!(@import $name $error $texture_id $($(#[$other_import_attr])* $other_import)*; $($(#[$meta])* $body ($field { type Error = $other_error; type TextureId = $other_texture_id; type Frame = $other_frame; })),*);
+        $crate::impl_renderer_internal!(@import $name$(<$($lt),*>)? $error $texture_id $($(#[$other_import_attr])* $other_import)*; $($(#[$meta])* $body ($field { type Error = $other_error; type TextureId = $other_texture_id; type Frame = $other_frame; })),*);
     };
-    (@import $name:ident $error:ident $texture_id:ident $(#[$import_attr:meta])* ImportDma $($(#[$other_import_attr:meta])* $other_import:ident)*; $($(#[$meta:meta])* $body:ident ($field:ty { type Error = $other_error:ty; type TextureId = $other_texture_id:ty; type Frame = $other_frame:ty; })),* $(,)?) => {
-        impl $crate::backend::renderer::ImportDma for $name {
+    (@import $name:ident$(<$($lt:lifetime),*>)? $error:ident $texture_id:ident $(#[$import_attr:meta])* ImportDma $($(#[$other_import_attr:meta])* $other_import:ident)*; $($(#[$meta:meta])* $body:ident ($field:ty { type Error = $other_error:ty; type TextureId = $other_texture_id:ty; type Frame = $other_frame:ty; })),* $(,)?) => {
+        impl$(<$($lt),*>)? $crate::backend::renderer::ImportDma for $name$(<$($lt),*>)? {
             fn import_dmabuf(
                 &mut self,
                 dmabuf: &Dmabuf,
@@ -1289,10 +1289,10 @@ macro_rules! impl_renderer_internal {
             }
         }
 
-        $crate::impl_renderer_internal!(@import $name $error $texture_id $($(#[$other_import_attr])* $other_import)*; $($(#[$meta])* $body ($field { type Error = $other_error; type TextureId = $other_texture_id; type Frame = $other_frame; })),*);
+        $crate::impl_renderer_internal!(@import $name$(<$($lt),*>)? $error $texture_id $($(#[$other_import_attr])* $other_import)*; $($(#[$meta])* $body ($field { type Error = $other_error; type TextureId = $other_texture_id; type Frame = $other_frame; })),*);
     };
-    (@import $name:ident $error:ident $texture_id:ident $(#[$import_attr:meta])* ImportDmaWl $($(#[$other_import_attr:meta])* $other_import:ident)*; $($(#[$meta:meta])* $body:ident ($field:ty { type Error = $other_error:ty; type TextureId = $other_texture_id:ty; type Frame = $other_frame:ty; })),* $(,)?) => {
-        impl $crate::backend::renderer::ImportDmaWl for $name {
+    (@import $name:ident$(<$($lt:lifetime),*>)? $error:ident $texture_id:ident $(#[$import_attr:meta])* ImportDmaWl $($(#[$other_import_attr:meta])* $other_import:ident)*; $($(#[$meta:meta])* $body:ident ($field:ty { type Error = $other_error:ty; type TextureId = $other_texture_id:ty; type Frame = $other_frame:ty; })),* $(,)?) => {
+        impl$(<$($lt),*>)? $crate::backend::renderer::ImportDmaWl for $name$(<$($lt),*>)? {
             fn import_dma_buffer(
                 &mut self,
                 buffer: &$crate::reexports::wayland_server::protocol::wl_buffer::WlBuffer,
@@ -1314,10 +1314,10 @@ macro_rules! impl_renderer_internal {
             }
         }
 
-        $crate::impl_renderer_internal!(@import $name $error $texture_id $($(#[$other_import_attr])* $other_import)*; $($(#[$meta])* $body ($field { type Error = $other_error; type TextureId = $other_texture_id; type Frame = $other_frame; })),*);
+        $crate::impl_renderer_internal!(@import $name$(<$($lt),*>)? $error $texture_id $($(#[$other_import_attr])* $other_import)*; $($(#[$meta])* $body ($field { type Error = $other_error; type TextureId = $other_texture_id; type Frame = $other_frame; })),*);
     };
-    (@import $name:ident $error:ident $texture_id:ident $(#[$import_attr:meta])* ImportMem $($(#[$other_import_attr:meta])* $other_import:ident)*; $($(#[$meta:meta])* $body:ident ($field:ty { type Error = $other_error:ty; type TextureId = $other_texture_id:ty; type Frame = $other_frame:ty; })),* $(,)?) => {
-        impl $crate::backend::renderer::ImportMem for $name {
+    (@import $name:ident$(<$($lt:lifetime),*>)? $error:ident $texture_id:ident $(#[$import_attr:meta])* ImportMem $($(#[$other_import_attr:meta])* $other_import:ident)*; $($(#[$meta:meta])* $body:ident ($field:ty { type Error = $other_error:ty; type TextureId = $other_texture_id:ty; type Frame = $other_frame:ty; })),* $(,)?) => {
+        impl$(<$($lt),*>)? $crate::backend::renderer::ImportMem for $name$(<$($lt),*>)? {
             fn import_memory(
                 &mut self,
                 data: &[u8],
@@ -1378,10 +1378,10 @@ macro_rules! impl_renderer_internal {
             }
         }
 
-        $crate::impl_renderer_internal!(@import $name $error $texture_id $($(#[$other_import_attr])* $other_import)*; $($(#[$meta])* $body ($field { type Error = $other_error; type TextureId = $other_texture_id; type Frame = $other_frame; })),*);
+        $crate::impl_renderer_internal!(@import $name$(<$($lt),*>)? $error $texture_id $($(#[$other_import_attr])* $other_import)*; $($(#[$meta])* $body ($field { type Error = $other_error; type TextureId = $other_texture_id; type Frame = $other_frame; })),*);
     };
-    (@import $name:ident $error:ident $texture_id:ident $(#[$import_attr:meta])* ImportMemWl $($(#[$other_import_attr:meta])* $other_import:ident)*; $($(#[$meta:meta])* $body:ident ($field:ty { type Error = $other_error:ty; type TextureId = $other_texture_id:ty; type Frame = $other_frame:ty; })),* $(,)?) => {
-        impl $crate::backend::renderer::ImportMemWl for $name {
+    (@import $name:ident$(<$($lt:lifetime),*>)? $error:ident $texture_id:ident $(#[$import_attr:meta])* ImportMemWl $($(#[$other_import_attr:meta])* $other_import:ident)*; $($(#[$meta:meta])* $body:ident ($field:ty { type Error = $other_error:ty; type TextureId = $other_texture_id:ty; type Frame = $other_frame:ty; })),* $(,)?) => {
+        impl$(<$($lt),*>)? $crate::backend::renderer::ImportMemWl for $name$(<$($lt),*>)? {
             fn import_shm_buffer(
                 &mut self,
                 buffer: &$crate::reexports::wayland_server::protocol::wl_buffer::WlBuffer,
@@ -1418,14 +1418,14 @@ macro_rules! impl_renderer_internal {
             }
         }
 
-        $crate::impl_renderer_internal!(@import $name $error $texture_id $($(#[$other_import_attr])* $other_import)*; $($(#[$meta])* $body ($field { type Error = $other_error; type TextureId = $other_texture_id; type Frame = $other_frame; })),*);
+        $crate::impl_renderer_internal!(@import $name$(<$($lt),*>)? $error $texture_id $($(#[$other_import_attr])* $other_import)*; $($(#[$meta])* $body ($field { type Error = $other_error; type TextureId = $other_texture_id; type Frame = $other_frame; })),*);
     };
-    (@import $name:ident $error:ident $texture_id:ident; $($(#[$meta:meta])* $body:ident ($field:ty { type Error = $other_error:ty; type TextureId = $other_texture_id:ty; type Frame = $other_frame:ty; })),* $(,)?) => {};
-    (@bind $name:ident $error:ident $texture_id:ident $(#[$bind_attr:meta])* $bind:ty, $($(#[$other_bind_attr:meta])* $other_bind:ty,),*; $($(#[$meta:meta])* $body:ident ($field:ty { type Error = $other_error:ty; type TextureId = $other_texture_id:ty; type Frame = $other_frame:ty; })),* $(,)?) => {
+    (@import $name:ident$(<$($lt:lifetime),*>)? $error:ident $texture_id:ident; $($(#[$meta:meta])* $body:ident ($field:ty { type Error = $other_error:ty; type TextureId = $other_texture_id:ty; type Frame = $other_frame:ty; })),* $(,)?) => {};
+    (@bind $name:ident$(<$($lt:lifetime),*>)? $error:ident $texture_id:ident $(#[$bind_attr:meta])* $bind:ty, $($(#[$other_bind_attr:meta])* $other_bind:ty,),*; $($(#[$meta:meta])* $body:ident ($field:ty { type Error = $other_error:ty; type TextureId = $other_texture_id:ty; type Frame = $other_frame:ty; })),* $(,)?) => {
         $(
             #[$bind_attr]
         )*
-        impl $crate::backend::renderer::Bind<$bind> for $name {
+        impl$(<$($lt),*>)? $crate::backend::renderer::Bind<$bind> for $name$(<$($lt),*>)? {
             fn bind(&mut self, target: $bind) -> Result<(), <Self as Renderer>::Error> {
                 match self {
                     $(
@@ -1453,10 +1453,10 @@ macro_rules! impl_renderer_internal {
             }
         }
 
-        $crate::impl_renderer_internal!(@bind $name $error $texture_id $($(#[$other_bind_attr])* $other_bind,),*; $($(#[$meta])* $body ($field { type Error = $other_error; type TextureId = $other_texture_id; type Frame = $other_frame; })),*);
+        $crate::impl_renderer_internal!(@bind $name$(<$($lt),*>)? $error $texture_id $($(#[$other_bind_attr])* $other_bind,),*; $($(#[$meta])* $body ($field { type Error = $other_error; type TextureId = $other_texture_id; type Frame = $other_frame; })),*);
     };
-    (@bind $name:ident $error:ident $texture_id:ident; $($(#[$meta:meta])* $body:ident ($field:ty { type Error = $other_error:ty; type TextureId = $other_texture_id:ty; type Frame = $other_frame:ty; })),* $(,)?) => {
-        impl $crate::backend::renderer::Unbind for $name {
+    (@bind $name:ident$(<$($lt:lifetime),*>)? $error:ident $texture_id:ident; $($(#[$meta:meta])* $body:ident ($field:ty { type Error = $other_error:ty; type TextureId = $other_texture_id:ty; type Frame = $other_frame:ty; })),* $(,)?) => {
+        impl$(<$($lt),*>)? $crate::backend::renderer::Unbind for $name$(<$($lt),*>)? {
             fn unbind(&mut self) -> Result<(), <Self as Renderer>::Error> {
                 match self {
                     $(
@@ -1476,7 +1476,7 @@ macro_rules! impl_renderer_internal {
 /// TODO: Docs
 #[macro_export]
 macro_rules! impl_renderer {
-    ($(#[$attr:meta])* $vis:vis $name:ident {
+    ($(#[$attr:meta])* $vis:vis $name:ident$(<$($lt:lifetime),*>)? {
             $(#[$error_attr:meta])* type Error = $error:ident;
             $(#[$texture_id_attr:meta])* type TextureId = $texture_id:ident;
             $(#[$frame_attr:meta])* type Frame = $frame:ident<$frame_lifetime:lifetime>;
@@ -1484,13 +1484,13 @@ macro_rules! impl_renderer {
         Imports=[$($(#[$import_attr:meta])* $import:ident,)*];
         Binds=[$($(#[$bind_attr:meta])* $bind:ty,)*];
         $($tail:tt)*) => {
-        $crate::impl_renderer_internal!(@enum $(#[$attr])* $vis $name; $($tail)*);
+        $crate::impl_renderer_internal!(@enum $(#[$attr])* $vis $name$(<$($lt),*>)?; $($tail)*);
         $crate::impl_renderer_internal!(@error $(#[$error_attr])* $vis $error; $($tail)*);
         $crate::impl_renderer_internal!(@texture_id $(#[$texture_id_attr])* $vis $texture_id $error; $($tail)*);
         $crate::impl_renderer_internal!(@frame $(#[$frame_attr])* $vis $frame<$frame_lifetime> $error $texture_id; $($tail)*);
-        $crate::impl_renderer_internal!(@renderer $vis $name $error $texture_id $frame<$frame_lifetime>; $($tail)*);
-        $crate::impl_renderer_internal!(@import $name $error $texture_id $($(#[$import_attr])* $import)*; $($tail)*);
-        $crate::impl_renderer_internal!(@bind $name $error $texture_id $($(#[$bind_attr])* $bind,)*; $($tail)*);
+        $crate::impl_renderer_internal!(@renderer $vis $name$(<$($lt),*>)? $error $texture_id $frame<$frame_lifetime>; $($tail)*);
+        $crate::impl_renderer_internal!(@import $name$(<$($lt),*>)? $error $texture_id $($(#[$import_attr])* $import)*; $($tail)*);
+        $crate::impl_renderer_internal!(@bind $name$(<$($lt),*>)? $error $texture_id $($(#[$bind_attr])* $bind,)*; $($tail)*);
     };
 }
 
