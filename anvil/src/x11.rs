@@ -201,18 +201,18 @@ pub fn run_x11() {
 
     #[cfg_attr(not(feature = "egl"), allow(unused_mut))]
     let mut renderer = if std::env::var("ANVIL_FORCE_SOFTWARE").is_ok() {
-        AutoRenderer::Software(PixmanRenderer::new().unwrap()) 
+        AutoRenderer::from(PixmanRenderer::new().unwrap()) 
     } else {
         if let Some(context) = context {
             match unsafe { GlesRenderer::new(context) } {
-                Ok(renderer) => AutoRenderer::Gles(renderer),
+                Ok(renderer) => AutoRenderer::from(renderer),
                 Err(err) => {
                     tracing::warn!(%err, "Failed to initialize gles renderer");
-                    AutoRenderer::Software(PixmanRenderer::new().unwrap()) 
+                    AutoRenderer::from(PixmanRenderer::new().unwrap()) 
                 },
             }
         } else {
-            AutoRenderer::Software(PixmanRenderer::new().unwrap()) 
+            AutoRenderer::from(PixmanRenderer::new().unwrap()) 
         }
     };
 

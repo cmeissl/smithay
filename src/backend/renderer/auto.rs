@@ -1112,6 +1112,46 @@ macro_rules! auto_renderer_internal {
             $crate::auto_renderer_internal!(@unbind_impl $error; $($(#[$meta])* $body),*);
         }
     };
+
+    /* From */
+    (@from $name:ident<$($lt:lifetime),+, $($custom:ident),+> $(where $($target:ty: $bound:tt $(+ $additional_bound:tt)*),+)?; $($(#[$meta:meta])* $body:ident ($field:ty { type Error = $other_error:ty; type TextureId = $other_texture_id:ty; type Frame = $other_frame:ty; })),* $(,)?) => {
+        $(
+            impl<$($lt),+, $($custom),+> std::convert::From<$field> for $name<$($lt),+, $($custom),+>
+            $(where $($target: $bound $(+ $additional_bound)*),+)? {
+                fn from(value: $field) -> Self {
+                    Self::$body(value)
+                }
+            }
+        )*
+    };
+    (@from $name:ident<$($lt:lifetime),+>; $($(#[$meta:meta])* $body:ident ($field:ty { type Error = $other_error:ty; type TextureId = $other_texture_id:ty; type Frame = $other_frame:ty; })),* $(,)?) => {
+        $(
+            impl<$($lt),+> std::convert::From<$field> for $name<$($lt),+> {
+                fn from(value: $field) -> Self {
+                    Self::$body(value)
+                }
+            }
+        )*
+    };
+    (@from $name:ident<$($custom:ident),+> $(where $($target:ty: $bound:tt $(+ $additional_bound:tt)*),+)?; $($(#[$meta:meta])* $body:ident ($field:ty { type Error = $other_error:ty; type TextureId = $other_texture_id:ty; type Frame = $other_frame:ty; })),* $(,)?) => {
+        $(
+            impl$($custom),+> std::convert::From<$field> for $name<$($custom),+>
+            $(where $($target: $bound $(+ $additional_bound)*),+)? {
+                fn from(value: $field) -> Self {
+                    Self::$body(value)
+                }
+            }
+        )*
+    };
+    (@from $name:ident; $($(#[$meta:meta])* $body:ident ($field:ty { type Error = $other_error:ty; type TextureId = $other_texture_id:ty; type Frame = $other_frame:ty; })),* $(,)?) => {
+        $(
+            impl std::convert::From<$field> for $name {
+                fn from(value: $field) -> Self {
+                    Self::$body(value)
+                }
+            }
+        )*
+    };
 }
 
 /// TODO: Docs
@@ -1132,6 +1172,7 @@ macro_rules! auto_renderer {
         $crate::auto_renderer_internal!(@renderer $vis $name<$($lt),+, $($custom),+> $error$(<$($error_lifetime),*, $($error_custom),*>)? $texture_id$(<$($texture_id_lifetime),*, $($texture_id_custom),*>)? $frame<$frame_lifetime $(,$additional_frame_lifetime)* $(,$frame_custom)*> $(where $($target: $bound $(+ $additional_bound)*),+)?; $($tail)*);
         $crate::auto_renderer_internal!(@import $name<$($lt),+, $($custom),+> $error $texture_id $($(#[$import_attr])* $import)*; $(where $($target: $bound $(+ $additional_bound)*),+)?; $($tail)*);
         $crate::auto_renderer_internal!(@bind $name<$($lt),+, $($custom),+> $error $texture_id $($(#[$bind_attr])* $bind,)* $(where $($target: $bound $(+ $additional_bound)*),+)?; $($tail)*);
+        $crate::auto_renderer_internal!(@from $name<$($lt),+, $($custom),+> $(where $($target: $bound $(+ $additional_bound)*),+)?; $($tail)*);
     };
     ($(#[$attr:meta])* $vis:vis $name:ident<$($lt:lifetime),+> {
             $(#[$error_attr:meta])* type Error = $error:ident$(<$($error_lifetime:lifetime),*>)?;
@@ -1148,6 +1189,7 @@ macro_rules! auto_renderer {
         $crate::auto_renderer_internal!(@renderer $vis $name<$($lt),+> $error$(<$($error_lifetime),*>)? $texture_id$(<$($texture_id_lifetime),*>)? $frame<$frame_lifetime $(,$additional_frame_lifetime)*>; $($tail)*);
         $crate::auto_renderer_internal!(@import $name<$($lt),+> $error $texture_id $($(#[$import_attr])* $import)*; $($tail)*);
         $crate::auto_renderer_internal!(@bind $name<$($lt),+> $error $texture_id $($(#[$bind_attr])* $bind,)*; $($tail)*);
+        $crate::auto_renderer_internal!(@from $name<$($lt),+>; $($tail)*);
     };
     ($(#[$attr:meta])* $vis:vis $name:ident<$($custom:ident),+> $(where $($target:ty: $bound:tt $(+ $additional_bound:tt)*),+)? {
             $(#[$error_attr:meta])* type Error = $error:ident$(<$($error_custom:ident),*>)? $(where $($error_target:ty: $error_bound:tt $(+ $error_additional_bound:tt)*),+)?;
@@ -1164,6 +1206,7 @@ macro_rules! auto_renderer {
         $crate::auto_renderer_internal!(@renderer $vis $name<$($custom),+> $error$(<$($error_custom),*>)? $texture_id$(<$($texture_id_custom),*>)? $frame<$frame_lifetime $(,$frame_custom)*> $(where $($target: $bound $(+ $additional_bound)*),+)?; $($tail)*);
         $crate::auto_renderer_internal!(@import $name<$($custom),+> $error $texture_id $($(#[$import_attr])* $import)*; $(where $($target: $bound $(+ $additional_bound)*),+)?; $($tail)*);
         $crate::auto_renderer_internal!(@bind $name<$($custom),+> $error $texture_id $($(#[$bind_attr])* $bind,)* $(where $($target: $bound $(+ $additional_bound)*),+)?; $($tail)*);
+        $crate::auto_renderer_internal!(@from $name<$($custom),+> $(where $($target: $bound $(+ $additional_bound)*),+)?; $($tail)*);
     };
     ($(#[$attr:meta])* $vis:vis $name:ident {
             $(#[$error_attr:meta])* type Error = $error:ident;
@@ -1180,6 +1223,7 @@ macro_rules! auto_renderer {
         $crate::auto_renderer_internal!(@renderer $vis $name $error $texture_id $frame<$frame_lifetime $(,$additional_frame_lifetime)*>; $($tail)*);
         $crate::auto_renderer_internal!(@import $name $error $texture_id $($(#[$import_attr])* $import)*; $($tail)*);
         $crate::auto_renderer_internal!(@bind $name $error $texture_id $($(#[$bind_attr])* $bind,)*; $($tail)*);
+        $crate::auto_renderer_internal!(@from $name; $($tail)*);
     };
 }
 
