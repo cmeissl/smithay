@@ -1004,12 +1004,21 @@ impl ImportMemWl for PixmanRenderer {
         _surface: Option<&SurfaceData>,
         _damage: &[Rectangle<i32, BufferCoords>],
     ) -> Result<PixmanTexture, PixmanError> {
-        let image = shm::with_buffer_contents(buffer, |ptr, _, data| {
+        let image = shm::with_buffer_contents(buffer, |ptr, len, data| {
             let format = FormatCode::try_from(
                 shm::shm_format_to_fourcc(data.format)
                     .ok_or(PixmanError::UnsupportedWlPixelFormat(data.format))?,
             )
             .map_err(|_| PixmanError::UnsupportedWlPixelFormat(data.format))?;
+
+            let expected_len = (data.offset + data.stride * data.height) as usize;
+            if len < expected_len {
+                return Err(PixmanError::IncompleteBuffer {
+                    expected: expected_len,
+                    actual: len,
+                });
+            }
+
             let image = unsafe {
                 // SAFETY: We guarantee that this image is only used for reading,
                 // so it is safe to cast the ptr to *mut
@@ -1017,7 +1026,7 @@ impl ImportMemWl for PixmanRenderer {
                     format,
                     data.width as usize,
                     data.height as usize,
-                    ptr.offset(data.offset as isize) as *mut _,
+                    ptr.offset(data.offset as isize) as *mut u32,
                     data.stride as usize,
                     false,
                 )
