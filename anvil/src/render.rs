@@ -1,5 +1,5 @@
 use smithay::{
-    backend::renderer::{
+    backend::{renderer::{
         damage::{Error as OutputDamageTrackerError, OutputDamageTracker, RenderOutputResult},
         element::{
             surface::WaylandSurfaceRenderElement,
@@ -9,13 +9,13 @@ use smithay::{
             },
             AsRenderElements, RenderElement, Wrap,
         },
-        ImportAll, ImportMem, Renderer,
-    },
+        ImportAll, ImportMem, Renderer, gles::{GlesRenderer, GlesError, GlesTexture, GlesFrame}, pixman::{PixmanRenderer, PixmanError, PixmanTexture, PixmanFrame},
+    }, allocator::dmabuf::Dmabuf},
     desktop::space::{
         constrain_space_element, ConstrainBehavior, ConstrainReference, Space, SpaceRenderElements,
     },
     output::Output,
-    utils::{Point, Rectangle, Size},
+    utils::{Point, Rectangle, Size}, auto_renderer,
 };
 
 #[cfg(feature = "debug")]
@@ -24,6 +24,45 @@ use crate::{
     drawing::{PointerRenderElement, CLEAR_COLOR, CLEAR_COLOR_FULLSCREEN},
     shell::{FullscreenSurface, WindowElement, WindowRenderElement},
 };
+
+auto_renderer! {
+    #[derive(Debug)]
+    pub AutoRenderer {
+        #[derive(Debug)]
+        type Error = AutoRendererError;
+        #[derive(Debug, Clone)]
+        type TextureId = AutoRendererTexture;
+        #[derive(Debug)]
+        type Frame = AutoRendererFrame<'frame>;
+    };
+    Imports=[
+        ImportDma,
+        ImportDmaWl,
+        #[cfg(feature = "egl")]
+        ImportEgl,
+        ImportMem,
+        ImportMemWl,
+    ];
+    Binds=[
+        Dmabuf,
+    ];
+    Gles(GlesRenderer {
+        type Error = GlesError;
+        type TextureId = GlesTexture;
+        type Frame = GlesFrame<'frame>;
+    }),
+    Software(PixmanRenderer {
+        type Error = PixmanError;
+        type TextureId = PixmanTexture;
+        type Frame = PixmanFrame<'frame>;
+    })
+}
+
+impl From<GlesError> for AutoRendererError {
+    fn from(value: GlesError) -> Self {
+        todo!()
+    }
+}
 
 smithay::backend::renderer::element::render_elements! {
     pub CustomRenderElements<R> where

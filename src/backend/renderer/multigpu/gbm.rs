@@ -34,38 +34,42 @@ use std::{collections::HashMap, os::unix::prelude::AsFd};
 
 /// Errors raised by the [`GbmGlesBackend`]
 #[derive(Debug, thiserror::Error)]
-pub enum Error {
+pub enum Error<R> {
     /// EGL api error
     #[error(transparent)]
     Egl(#[from] EGLError),
     /// OpenGL error
     #[error(transparent)]
-    Gl(#[from] GlesError),
+    Renderer(R),
     /// Error creating a drm node
     #[error(transparent)]
     DrmNode(#[from] CreateDrmNodeError),
 }
 
-impl From<Error> for SwapBuffersError {
-    fn from(err: Error) -> SwapBuffersError {
+impl<R> From<Error<R>> for SwapBuffersError
+where
+    SwapBuffersError: From<R>,
+    R: std::error::Error + Sync + Send + 'static,
+{
+    fn from(err: Error<R>) -> SwapBuffersError {
         match err {
             x @ Error::DrmNode(_) | x @ Error::Egl(_) => SwapBuffersError::ContextLost(Box::new(x)),
-            Error::Gl(x) => x.into(),
+            Error::Renderer(x) => x.into(),
         }
     }
 }
 
-type Factory = Box<dyn Fn(&EGLDisplay) -> Result<GlesRenderer, Error>>;
+type Factory<R> = Box<dyn Fn(&EGLDisplay) -> Result<R, Error<<R as Renderer>::Error>>>;
 
 /// A [`GraphicsApi`] utilizing user-provided GBM Devices and OpenGL ES for rendering.
-pub struct GbmGlesBackend<R> {
+pub struct GbmGlesBackend<R: Renderer> {
     devices: HashMap<DrmNode, EGLDisplay>,
-    factory: Option<Factory>,
+    factory: Option<Factory<R>>,
     context_priority: Option<ContextPriority>,
     _renderer: std::marker::PhantomData<R>,
 }
 
-impl<R> std::fmt::Debug for GbmGlesBackend<R> {
+impl<R: Renderer> std::fmt::Debug for GbmGlesBackend<R> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("GbmGlesBackend")
             .field("devices", &self.devices)
@@ -73,7 +77,7 @@ impl<R> std::fmt::Debug for GbmGlesBackend<R> {
     }
 }
 
-impl<R> Default for GbmGlesBackend<R> {
+impl<R: Renderer> Default for GbmGlesBackend<R> {
     fn default() -> Self {
         GbmGlesBackend {
             devices: HashMap::new(),
@@ -84,11 +88,11 @@ impl<R> Default for GbmGlesBackend<R> {
     }
 }
 
-impl<R> GbmGlesBackend<R> {
+impl<R: Renderer> GbmGlesBackend<R> {
     /// Initialize a new [`GbmGlesBackend`] with a factory for instantiating [`GlesRenderer`]s
     pub fn with_factory<F>(factory: F) -> Self
     where
-        F: Fn(&EGLDisplay) -> Result<GlesRenderer, Error> + 'static,
+        F: Fn(&EGLDisplay) -> Result<R, Error<<R as Renderer>::Error>> + 'static,
     {
         Self {
             factory: Some(Box::new(factory)),
@@ -124,9 +128,13 @@ impl<R> GbmGlesBackend<R> {
     }
 }
 
-impl<R: From<GlesRenderer> + Renderer<Error = GlesError>> GraphicsApi for GbmGlesBackend<R> {
+impl<R> GraphicsApi for GbmGlesBackend<R>
+where
+    R: Renderer + From<GlesRenderer>,
+    <R as Renderer>::Error: From<GlesError>,
+{
     type Device = GbmGlesDevice<R>;
-    type Error = Error;
+    type Error = Error<<R as Renderer>::Error>;
 
     fn enumerate(&self, list: &mut Vec<Self::Device>) -> Result<(), Self::Error> {
         // remove old stuff
@@ -152,7 +160,8 @@ impl<R: From<GlesRenderer> + Renderer<Error = GlesError>> GraphicsApi for GbmGle
                     let context =
                         EGLContext::new_with_priority(display, self.context_priority.unwrap_or_default())
                             .map_err(Error::Egl)?;
-                    unsafe { GlesRenderer::new(context).map_err(Error::Gl)? }.into()
+                    unsafe { GlesRenderer::new(context).map_err(|err| Error::Renderer(R::Error::from(err)))? }
+                        .into()
                 };
 
                 Ok(GbmGlesDevice {
@@ -161,13 +170,15 @@ impl<R: From<GlesRenderer> + Renderer<Error = GlesError>> GraphicsApi for GbmGle
                     renderer,
                 })
             })
-            .flat_map(|x: Result<GbmGlesDevice<R>, Error>| match x {
-                Ok(x) => Some(x),
-                Err(x) => {
-                    warn!("Skipping GbmDevice: {}", x);
-                    None
-                }
-            })
+            .flat_map(
+                |x: Result<GbmGlesDevice<R>, Error<<R as Renderer>::Error>>| match x {
+                    Ok(x) => Some(x),
+                    Err(x) => {
+                        warn!("Skipping GbmDevice: {}", x);
+                        None
+                    }
+                },
+            )
             .collect::<Vec<GbmGlesDevice<R>>>();
         list.extend(new_renderers);
 
@@ -182,16 +193,16 @@ impl<R: From<GlesRenderer> + Renderer<Error = GlesError>> GraphicsApi for GbmGle
 }
 
 // TODO: Replace with specialization impl in multigpu/mod once possible
-impl<T: GraphicsApi, R: From<GlesRenderer> + Renderer<Error = GlesError>> std::convert::From<GlesError>
-    for MultiError<GbmGlesBackend<R>, T>
-where
-    T::Error: 'static,
-    <<T::Device as ApiDevice>::Renderer as Renderer>::Error: 'static,
-{
-    fn from(err: GlesError) -> MultiError<GbmGlesBackend<R>, T> {
-        MultiError::Render(err)
-    }
-}
+// impl<T: GraphicsApi, R: Renderer + From<GlesRenderer>> std::convert::From<<R as Renderer>::Error>
+//     for MultiError<GbmGlesBackend<R>, T>
+// where
+//     T::Error: 'static,
+//     <<T::Device as ApiDevice>::Renderer as Renderer>::Error: 'static,
+// {
+//     fn from(err: GlesError) -> MultiError<GbmGlesBackend<R>, T> {
+//         MultiError::Render(err)
+//     }
+// }
 
 /// [`ApiDevice`] of the [`GbmGlesBackend`]
 #[derive(Debug)]

@@ -328,7 +328,7 @@ macro_rules! auto_renderer_internal {
                 src: $crate::utils::Rectangle<f64, $crate::utils::Buffer>,
                 dst: $crate::utils::Rectangle<i32, $crate::utils::Physical>,
                 damage: &[$crate::utils::Rectangle<i32, $crate::utils::Physical>],
-                src_transform: Transform,
+                src_transform: $crate::utils::Transform,
                 alpha: f32,
             ) -> Result<(), Self::Error> {
                 match self {
@@ -543,7 +543,7 @@ macro_rules! auto_renderer_internal {
             fn render(
                 &mut self,
                 output_size: $crate::utils::Size<i32, $crate::utils::Physical>,
-                dst_transform: Transform,
+                dst_transform: $crate::utils::Transform,
             ) -> Result<Self::Frame<'_>, Self::Error> {
                 match self {
                     $(
@@ -842,7 +842,7 @@ macro_rules! auto_renderer_internal {
             fn import_memory(
                 &mut self,
                 data: &[u8],
-                format: gbm::Format,
+                format: $crate::backend::allocator::Fourcc,
                 size: $crate::utils::Size<i32, $crate::utils::Buffer>,
                 flipped: bool,
             ) -> Result<<Self as Renderer>::TextureId, <Self as Renderer>::Error> {
@@ -885,7 +885,7 @@ macro_rules! auto_renderer_internal {
                 }
             }
 
-            fn mem_formats(&self) -> Box<dyn Iterator<Item = gbm::Format>> {
+            fn mem_formats(&self) -> Box<dyn Iterator<Item = $crate::backend::allocator::Fourcc>> {
                 match self {
                     $(
                         #[allow(unused_doc_comments)]

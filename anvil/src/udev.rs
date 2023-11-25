@@ -125,8 +125,8 @@ pub struct UdevData {
     dmabuf_state: Option<(DmabufState, DmabufGlobal)>,
     primary_gpu: DrmNode,
     allocator: Option<Box<dyn Allocator<Buffer = Dmabuf, Error = AnyError>>>,
-    //gpus: GpuManager<GbmGlesBackend<GlesRenderer>>,
-    renderer: PixmanRenderer,
+    gpus: GpuManager<GbmGlesBackend<AutoRenderer>>,
+    //renderer: PixmanRenderer,
     backends: HashMap<DrmNode, BackendData>,
     pointer_images: Vec<(xcursor::parser::Image, TextureBuffer<PixmanTexture>)>,
     pointer_element: PointerElement<PixmanTexture>,
@@ -160,18 +160,18 @@ impl DmabufHandler for AnvilState<UdevData> {
     }
 
     fn dmabuf_imported(&mut self, _global: &DmabufGlobal, dmabuf: Dmabuf, notifier: ImportNotifier) {
-        // if self
-        //     .backend_data
-        //     .gpus
-        //     .single_renderer(&self.backend_data.primary_gpu)
-        //     .and_then(|mut renderer| renderer.import_dmabuf(&dmabuf, None))
-        //     .is_err()
-        // {
-        //     notifier.failed();
-        // }
-        if self.backend_data.renderer.import_dmabuf(&dmabuf, None).is_err() {
+        if self
+            .backend_data
+            .gpus
+            .single_renderer(&self.backend_data.primary_gpu)
+            .and_then(|mut renderer| renderer.import_dmabuf(&dmabuf, None))
+            .is_err()
+        {
             notifier.failed();
         }
+        // if self.backend_data.renderer.import_dmabuf(&dmabuf, None).is_err() {
+        //     notifier.failed();
+        // }
     }
 }
 delegate_dmabuf!(AnvilState<UdevData>);
@@ -239,7 +239,7 @@ pub fn run_udev() {
     };
     info!("Using {} as primary gpu.", primary_gpu);
 
-    //let gpus = GpuManager::new(GbmGlesBackend::with_context_priority(ContextPriority::High)).unwrap();
+    let gpus = GpuManager::new(GbmGlesBackend::with_context_priority(ContextPriority::High)).unwrap();
     let renderer = PixmanRenderer::new().unwrap();
 
     let data = UdevData {
@@ -247,7 +247,7 @@ pub fn run_udev() {
         dmabuf_state: None,
         session,
         primary_gpu,
-        //gpus,
+        gpus,
         renderer,
         allocator: None,
         backends: HashMap::new(),

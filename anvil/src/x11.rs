@@ -24,12 +24,8 @@ use smithay::{
         },
         egl::{EGLContext, EGLDisplay},
         renderer::{
-            auto::auto_renderer,
-            damage::OutputDamageTracker,
-            element::AsRenderElements,
-            gles::{GlesError, GlesFrame, GlesRenderer, GlesTexture},
-            pixman::{PixmanError, PixmanFrame, PixmanRenderer, PixmanTexture},
-            Bind, ImportDma, ImportMemWl, Renderer,
+            damage::OutputDamageTracker, element::AsRenderElements, gles::GlesRenderer,
+            pixman::PixmanRenderer, Bind, ImportDma, ImportMemWl,
         },
         vulkan::{version::Version, Instance, PhysicalDevice},
         x11::{WindowBuilder, X11Backend, X11Event, X11Surface},
@@ -44,7 +40,7 @@ use smithay::{
         wayland_protocols::wp::presentation_time::server::wp_presentation_feedback,
         wayland_server::{protocol::wl_surface, Display},
     },
-    utils::{DeviceFd, IsAlive, Scale, Transform},
+    utils::{DeviceFd, IsAlive, Scale},
     wayland::{
         compositor,
         dmabuf::{
@@ -55,39 +51,6 @@ use smithay::{
 use tracing::{error, info, trace, warn};
 
 pub const OUTPUT_NAME: &str = "x11";
-
-auto_renderer! {
-    #[derive(Debug)]
-    pub AutoRenderer {
-        #[derive(Debug)]
-        type Error = AutoRendererError;
-        #[derive(Debug, Clone)]
-        type TextureId = AutoRendererTexture;
-        #[derive(Debug)]
-        type Frame = AutoRendererFrame<'frame>;
-    };
-    Imports=[
-        ImportDma,
-        ImportDmaWl,
-        #[cfg(feature = "egl")]
-        ImportEgl,
-        ImportMem,
-        ImportMemWl,
-    ];
-    Binds=[
-        Dmabuf,
-    ];
-    Gles(GlesRenderer {
-        type Error = GlesError;
-        type TextureId = GlesTexture;
-        type Frame = GlesFrame<'frame>;
-    }),
-    Software(PixmanRenderer {
-        type Error = PixmanError;
-        type TextureId = PixmanTexture;
-        type Frame = PixmanFrame<'frame>;
-    })
-}
 
 #[derive(Debug)]
 pub struct X11Data {
@@ -201,18 +164,18 @@ pub fn run_x11() {
 
     #[cfg_attr(not(feature = "egl"), allow(unused_mut))]
     let mut renderer = if std::env::var("ANVIL_FORCE_SOFTWARE").is_ok() {
-        AutoRenderer::from(PixmanRenderer::new().unwrap()) 
+        AutoRenderer::from(PixmanRenderer::new().unwrap())
     } else {
         if let Some(context) = context {
             match unsafe { GlesRenderer::new(context) } {
                 Ok(renderer) => AutoRenderer::from(renderer),
                 Err(err) => {
                     tracing::warn!(%err, "Failed to initialize gles renderer");
-                    AutoRenderer::from(PixmanRenderer::new().unwrap()) 
-                },
+                    AutoRenderer::from(PixmanRenderer::new().unwrap())
+                }
             }
         } else {
-            AutoRenderer::from(PixmanRenderer::new().unwrap()) 
+            AutoRenderer::from(PixmanRenderer::new().unwrap())
         }
     };
 
