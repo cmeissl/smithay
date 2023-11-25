@@ -143,9 +143,11 @@ impl PixmanImage {
 
     #[profiling::function]
     fn accessor<'l>(&'l self) -> Result<TextureAccessor<'l>, PixmanError> {
-        if let Some(buffer) = self.buffer.as_ref() {
-            buffer.upgrade().map_err(|_| PixmanError::WlBufferDestroyed)?;
-        }
+        let buffer = if let Some(buffer) = self.buffer.as_ref() {
+            Some(buffer.upgrade().map_err(|_| PixmanError::WlBufferDestroyed)?)
+        } else {
+            None
+        };
 
         let guard = if let Some(mapping) = self.dmabuf.as_ref() {
             Some(DmabufReadGuard::new(&mapping.dmabuf)?)
@@ -154,6 +156,7 @@ impl PixmanImage {
         };
 
         Ok(TextureAccessor {
+            buffer,
             image: self.image(),
             _guard: guard,
         })
@@ -197,8 +200,15 @@ impl<'fd> Drop for DmabufReadGuard<'fd> {
 }
 
 struct TextureAccessor<'l> {
+    buffer: Option<wl_buffer::WlBuffer>,
     image: &'l Image<'static, 'static>,
     _guard: Option<DmabufReadGuard<'l>>,
+}
+
+impl<'l> TextureAccessor<'l> {
+    fn buffer(&self) -> Option<&wl_buffer::WlBuffer> {
+        self.buffer.as_ref()
+    }
 }
 
 impl<'l> Deref for TextureAccessor<'l> {
@@ -566,19 +576,39 @@ impl<'frame> Frame for PixmanFrame<'frame> {
             None
         };
 
-        target_image.composite32(
-            op,
-            &src_image,
-            mask.as_deref(),
-            src_x,
-            src_y,
-            0,
-            0,
-            dest_x,
-            dest_y,
-            width,
-            height,
-        );
+        if let Some(buffer) = src_image.buffer() {
+            shm::with_buffer_contents(buffer, |_, _, _| {
+                // TODO: Maybe a good place to check if the pool has been resized behind our back by
+                // comparing the ptr                
+                target_image.composite32(
+                    op,
+                    &src_image,
+                    mask.as_deref(),
+                    src_x,
+                    src_y,
+                    0,
+                    0,
+                    dest_x,
+                    dest_y,
+                    width,
+                    height,
+                );
+            })?;
+        } else {
+            target_image.composite32(
+                op,
+                &src_image,
+                mask.as_deref(),
+                src_x,
+                src_y,
+                0,
+                0,
+                dest_x,
+                dest_y,
+                width,
+                height,
+            );
+        }
 
         if self.renderer.debug_flags.contains(DebugFlags::TINT) {
             profiling::scope!("tint");
