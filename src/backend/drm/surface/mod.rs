@@ -392,6 +392,7 @@ impl DrmSurface {
     /// Claim a plane so that it won't be used by a different crtc
     ///  
     /// Returns `None` if the plane could not be claimed
+    #[profiling::function]
     pub fn claim_plane(&self, plane: plane::Handle) -> Option<PlaneClaim> {
         // Validate that we are called with an plane that belongs to us
         if self.planes.primary.handle == plane
@@ -417,10 +418,27 @@ impl DrmSurface {
     /// Usually you do not need to call this in other circumstances, but if
     /// the state of the crtc is modified elsewhere, you may call this function
     /// to reset it's internal state.
+    #[profiling::function]
     pub fn reset_state(&self) -> Result<(), Error> {
         match &*self.internal {
             DrmSurfaceInternal::Atomic(surf) => surf.reset_state::<Self>(None),
             DrmSurfaceInternal::Legacy(surf) => surf.reset_state::<Self>(None),
+        }
+    }
+
+    #[profiling::function]
+    pub fn clear_state(&self) -> Result<(), Error> {
+        match &*self.internal {
+            DrmSurfaceInternal::Atomic(surf) => surf.clear_state(),
+            DrmSurfaceInternal::Legacy(surf) => surf.clear_state(),
+        }
+    }
+
+    #[profiling::function]
+    pub fn suspend(&self) -> Result<(), Error> {
+        match &*self.internal {
+            DrmSurfaceInternal::Atomic(surf) => surf.suspend(),
+            DrmSurfaceInternal::Legacy(surf) => surf.suspend(),
         }
     }
 

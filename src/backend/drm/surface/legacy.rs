@@ -387,6 +387,31 @@ impl LegacyDrmSurface {
             })
     }
 
+    #[profiling::function]
+    pub fn clear_state(&self) -> Result<(), Error> {
+        // disable connectors again
+        let mut current = self.state.write().unwrap();
+        set_connector_state(&*self.fd, current.connectors.iter().copied(), false)?;
+        current.connectors.clear();
+        self.fd
+            .set_crtc(self.crtc, None, (0, 0), &[], None)
+            .map_err(|source| {
+                Error::Access(AccessError {
+                    errmsg: "Failed to test buffer",
+                    dev: self.fd.dev_path(),
+                    source,
+                })
+            })?;
+        current.mode = unsafe { std::mem::zeroed() };
+        current.active = false;
+        Ok(())
+    }
+
+    #[profiling::function]
+    pub fn suspend(&self) -> Result<(), Error> {
+        self.clear_state()
+    }
+
     // we use this function to verify, if a certain connector/mode combination
     // is valid on our crtc. We do this with the most basic information we have:
     // - is there a matching encoder

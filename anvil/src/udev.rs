@@ -153,6 +153,25 @@ impl UdevData {
     pub fn debug_flags(&self) -> DebugFlags {
         self.debug_flags
     }
+
+    pub fn reset_surfaces(&mut self) {
+        for (_, backend) in self.backends.iter_mut() {
+            for (_, surface) in backend.surfaces.iter_mut() {
+                match &mut surface.compositor {
+                    SurfaceComposition::Surface { surface, .. } => {
+                        let _ = surface.surface().clear_state();
+                    }
+                    SurfaceComposition::Compositor(comp) => {
+                        comp.surface().suspend().unwrap();
+                        // if let Err(err) = comp.clear_state() {
+                        //     tracing::warn!(?err, "failed to clear state");
+                        //     panic!("{:?}", err);
+                        // }
+                    }
+                };
+            }
+        }
+    }
 }
 
 impl DmabufHandler for AnvilState<UdevData> {
@@ -357,7 +376,7 @@ pub fn run_udev() {
                         lease_global.resume::<AnvilState<UdevData>>();
                     }
                     for surface in backend.surfaces.values_mut() {
-                        if let Err(err) = surface.compositor.surface().reset_state() {
+                        if let Err(err) = surface.compositor.reset_state() {
                             warn!("Failed to reset drm surface state: {}", err);
                         }
                     }
@@ -666,6 +685,16 @@ impl SurfaceComposition {
         match self {
             SurfaceComposition::Compositor(c) => c.reset_buffers(),
             SurfaceComposition::Surface { surface, .. } => surface.reset_buffers(),
+        }
+    }
+
+    fn reset_state(&mut self) -> Result<(), SwapBuffersError> {
+        match self {
+            SurfaceComposition::Compositor(c) => c.reset_state().map_err(Into::<SwapBuffersError>::into),
+            SurfaceComposition::Surface { surface, .. } => surface
+                .surface()
+                .reset_state()
+                .map_err(Into::<SwapBuffersError>::into),
         }
     }
 

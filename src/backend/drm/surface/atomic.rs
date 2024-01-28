@@ -931,7 +931,7 @@ impl AtomicDrmSurface {
     }
 
     #[profiling::function]
-    fn clear_state(&self) -> Result<(), Error> {
+    pub fn clear_state(&self) -> Result<(), Error> {
         if !self.active.load(Ordering::SeqCst) {
             return Err(Error::DeviceInactive);
         }
@@ -1070,6 +1070,35 @@ impl AtomicDrmSurface {
         }
 
         Ok(())
+    }
+
+    pub fn suspend(&self) -> Result<(), Error> {
+        let mut req = AtomicModeReq::new();
+        let prop_mapping = self.prop_mapping.read().unwrap();
+        let active_prop = prop_mapping
+            .1
+            .get(&self.crtc)
+            .expect("Unknown Handle")
+            .get("ACTIVE")
+            .expect("Unknown property ACTIVE");
+        req.add_property(self.crtc, *active_prop, property::Value::Boolean(false));
+
+        let res = self
+            .fd
+            .atomic_commit(AtomicCommitFlags::ALLOW_MODESET, req)
+            .map_err(|source| {
+                Error::Access(AccessError {
+                    errmsg: "Failed to commit on suspend",
+                    dev: self.fd.dev_path(),
+                    source,
+                })
+            });
+
+        if res.is_ok() {
+            self.state.write().unwrap().active = false;
+        }
+
+        res
     }
 
     pub(crate) fn reset_state<B: DevPath + ControlDevice + 'static>(

@@ -703,6 +703,9 @@ impl AnvilState<UdevData> {
                     debug_flags.toggle(DebugFlags::TINT);
                     self.backend_data.set_debug_flags(debug_flags);
                 }
+                KeyAction::ResetOutputs => {
+                    self.backend_data.reset_surfaces();
+                }
 
                 action => match action {
                     KeyAction::None
@@ -1193,6 +1196,7 @@ enum KeyAction {
     RotateOutput,
     ToggleTint,
     ToggleDecorations,
+    ResetOutputs,
     /// Do nothing more
     None,
 }
@@ -1225,6 +1229,8 @@ fn process_keyboard_shortcut(modifiers: ModifiersState, keysym: Keysym) -> Optio
         Some(KeyAction::ToggleTint)
     } else if modifiers.logo && modifiers.shift && keysym == Keysym::D {
         Some(KeyAction::ToggleDecorations)
+    } else if modifiers.logo && modifiers.shift && keysym == Keysym::L {
+        Some(KeyAction::ResetOutputs)
     } else {
         None
     }
