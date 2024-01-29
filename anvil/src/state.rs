@@ -592,7 +592,7 @@ impl<BackendData: Backend + 'static> AnvilState<BackendData> {
 
         let cursor_status = Arc::new(Mutex::new(CursorImageStatus::default_named()));
         let pointer = seat.add_pointer();
-        seat.add_keyboard(XkbConfig::default(), 200, 25)
+        seat.add_keyboard(XkbConfig::default(), 200, 25, true, false)
             .expect("Failed to initialize the keyboard");
 
         let cursor_status2 = cursor_status.clone();

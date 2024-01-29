@@ -158,7 +158,13 @@ impl<D: SeatHandler> fmt::Debug for KbdInternal<D> {
 unsafe impl<D: SeatHandler> Send for KbdInternal<D> {}
 
 impl<D: SeatHandler + 'static> KbdInternal<D> {
-    fn new(xkb_config: XkbConfig<'_>, repeat_rate: i32, repeat_delay: i32) -> Result<KbdInternal<D>, ()> {
+    fn new(
+        xkb_config: XkbConfig<'_>,
+        repeat_rate: i32,
+        repeat_delay: i32,
+        numlock: bool,
+        capslock: bool,
+    ) -> Result<KbdInternal<D>, ()> {
         // we create a new contex for each keyboard because libxkbcommon is actually NOT threadsafe
         // so confining it inside the KbdInternal allows us to use Rusts mutability rules to make
         // sure nothing goes wrong.
@@ -167,7 +173,35 @@ impl<D: SeatHandler + 'static> KbdInternal<D> {
         // non-threadsafety properly.
         let context = xkb::Context::new(xkb::CONTEXT_NO_FLAGS);
         let keymap = xkb_config.compile_keymap(&context)?;
-        let state = xkb::State::new(&keymap);
+        let mut state = xkb::State::new(&keymap);
+        let mut mods_state = ModifiersState::from_state(&state);
+        let mut serialized = mods_state.serialized;
+
+        if numlock {
+            let num_index = keymap.mod_get_index(xkb::MOD_NAME_NUM);
+            if num_index != xkb::MOD_INVALID {
+                serialized.locked |= 1 << num_index;
+            }
+        }
+
+        if capslock {
+            let caps_index = keymap.mod_get_index(xkb::MOD_NAME_CAPS);
+            if caps_index != xkb::MOD_INVALID {
+                serialized.locked |= 1 << caps_index;
+            }
+        }
+
+        let updated = state.update_mask(
+            serialized.depressed,
+            serialized.latched,
+            serialized.locked,
+            serialized.depressed,
+            serialized.latched,
+            serialized.locked,
+        );
+        if updated != 0 {
+            mods_state.update_with(&state);
+        }
         let led_mapping = LedMapping::from_keymap(&keymap);
         let led_state = LedState::from_state(&state, &led_mapping);
         Ok(KbdInternal {
@@ -175,7 +209,7 @@ impl<D: SeatHandler + 'static> KbdInternal<D> {
             pending_focus: None,
             pressed_keys: HashSet::new(),
             forwarded_pressed_keys: HashSet::new(),
-            mods_state: ModifiersState::default(),
+            mods_state,
             context,
             keymap,
             state,
@@ -594,15 +628,22 @@ impl<D: SeatHandler> ::std::cmp::PartialEq for KeyboardHandle<D> {
 
 impl<D: SeatHandler + 'static> KeyboardHandle<D> {
     /// Create a keyboard handler from a set of RMLVO rules
-    pub(crate) fn new(xkb_config: XkbConfig<'_>, repeat_delay: i32, repeat_rate: i32) -> Result<Self, Error> {
+    pub(crate) fn new(
+        xkb_config: XkbConfig<'_>,
+        repeat_delay: i32,
+        repeat_rate: i32,
+        numlock: bool,
+        capslock: bool,
+    ) -> Result<Self, Error> {
         let span = info_span!("input_keyboard");
         let _guard = span.enter();
 
         info!("Initializing a xkbcommon handler with keymap query");
-        let internal = KbdInternal::new(xkb_config, repeat_rate, repeat_delay).map_err(|_| {
-            debug!("Loading keymap failed");
-            Error::BadKeymap
-        })?;
+        let internal =
+            KbdInternal::new(xkb_config, repeat_rate, repeat_delay, numlock, capslock).map_err(|_| {
+                debug!("Loading keymap failed");
+                Error::BadKeymap
+            })?;
 
         info!(name = internal.keymap.layouts().next(), "Loaded Keymap");
 

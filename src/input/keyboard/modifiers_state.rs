@@ -38,6 +38,13 @@ impl ModifiersState {
         self.num_lock = state.mod_name_is_active(&xkb::MOD_NAME_NUM, xkb::STATE_MODS_EFFECTIVE);
         self.serialized = serialize_modifiers(state);
     }
+
+    /// Initialize the modifiers state from an xkb state
+    pub fn from_state(state: &xkb::State) -> Self {
+        let mut modifier_state = ModifiersState::default();
+        modifier_state.update_with(&state);
+        modifier_state
+    }
 }
 
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash)]
