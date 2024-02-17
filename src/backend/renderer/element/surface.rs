@@ -226,7 +226,7 @@ use wayland_server::protocol::wl_surface;
 use crate::{
     backend::renderer::{
         utils::{Buffer, DamageSet, DamageSnapshot, RendererSurfaceStateUserData, SurfaceView},
-        Frame, ImportAll, Renderer, Texture,
+        Frame, ImportAll, PresentationMode, Renderer, Texture,
     },
     utils::{Buffer as BufferCoords, Logical, Physical, Point, Rectangle, Scale, Size, Transform},
     wayland::compositor::{self, SurfaceData, TraversalAction},
@@ -488,6 +488,12 @@ impl<R: Renderer + ImportAll> Element for WaylandSurfaceRenderElement<R> {
 
     fn kind(&self) -> Kind {
         self.kind
+    }
+
+    fn presentation_mode(&self) -> Option<PresentationMode> {
+        // On Wayland assume VSync as default preference
+        Some(PresentationMode::VSync)
+        // TODO: Return Async in case wp_tearing is attatched to the surface
     }
 }
 

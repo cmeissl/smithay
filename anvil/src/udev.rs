@@ -41,7 +41,7 @@ use smithay::{
             gles::{GlesRenderer, GlesTexture},
             multigpu::{gbm::GbmGlesBackend, GpuManager, MultiRenderer},
             sync::SyncPoint,
-            Bind, DebugFlags, ExportMem, ImportDma, ImportMemWl, Offscreen, Renderer,
+            Bind, DebugFlags, ExportMem, ImportDma, ImportMemWl, Offscreen, PresentationMode, Renderer,
         },
         session::{
             libseat::{self, LibSeatSession},
@@ -570,6 +570,7 @@ struct SurfaceCompositorRenderResult<'a> {
     states: RenderElementStates,
     sync: Option<SyncPoint>,
     damage: Option<&'a Vec<Rectangle<i32, Physical>>>,
+    presentation_mode: PresentationMode,
 }
 
 impl SurfaceComposition {
@@ -620,14 +621,15 @@ impl SurfaceComposition {
         sync: Option<SyncPoint>,
         damage: Option<Vec<Rectangle<i32, Physical>>>,
         user_data: Option<OutputPresentationFeedback>,
+        presentation_mode: PresentationMode,
     ) -> Result<(), SwapBuffersError> {
         match self {
             SurfaceComposition::Surface { surface, .. } => surface
-                .queue_buffer(sync, damage, user_data)
+                .queue_buffer(sync, damage, user_data, presentation_mode)
                 .map_err(Into::<SwapBuffersError>::into),
-            SurfaceComposition::Compositor(c) => {
-                c.queue_frame(user_data).map_err(Into::<SwapBuffersError>::into)
-            }
+            SurfaceComposition::Compositor(c) => c
+                .queue_frame(user_data, presentation_mode)
+                .map_err(Into::<SwapBuffersError>::into),
         }
     }
 
@@ -665,6 +667,7 @@ impl SurfaceComposition {
                             damage: res.damage,
                             states: res.states,
                             sync: rendered.then_some(res.sync),
+                            presentation_mode: PresentationMode::VSync,
                         }
                     })
                     .map_err(|err| match err {
@@ -681,11 +684,13 @@ impl SurfaceComposition {
                     if let PrimaryPlaneElement::Swapchain(element) = render_frame_result.primary_element {
                         element.sync.wait();
                     }
+                    let presentation_mode = render_frame_result.presentation_mode();
                     SurfaceCompositorRenderResult {
                         rendered: !render_frame_result.is_empty,
                         damage: None,
                         states: render_frame_result.states,
                         sync: None,
+                        presentation_mode,
                     }
                 })
                 .map_err(|err| match err {
@@ -1626,6 +1631,7 @@ fn render_surface<'a>(
         states,
         sync,
         damage,
+        presentation_mode,
     } = surface
         .compositor
         .render_frame::<_, _, GlesTexture>(renderer, &elements, clear_color)?;
@@ -1649,7 +1655,12 @@ fn render_surface<'a>(
         let damage = damage.cloned();
         surface
             .compositor
-            .queue_frame(sync, damage, Some(output_presentation_feedback))
+            .queue_frame(
+                sync,
+                damage,
+                Some(output_presentation_feedback),
+                presentation_mode,
+            )
             .map_err(Into::<SwapBuffersError>::into)?;
     }
 
@@ -1663,7 +1674,9 @@ fn initial_render(
     surface
         .compositor
         .render_frame::<_, CustomRenderElements<_>, GlesTexture>(renderer, &[], CLEAR_COLOR)?;
-    surface.compositor.queue_frame(None, None, None)?;
+    surface
+        .compositor
+        .queue_frame(None, None, None, PresentationMode::VSync)?;
     surface.compositor.reset_buffers();
 
     Ok(())
