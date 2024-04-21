@@ -17,9 +17,10 @@ fn main() {
         tracing_subscriber::fmt()
             .compact()
             .with_env_filter(env_filter)
+            .with_ansi(false)
             .init();
     } else {
-        tracing_subscriber::fmt().compact().init();
+        tracing_subscriber::fmt().compact().with_ansi(false).init();
     }
 
     #[cfg(feature = "profile-with-tracy")]

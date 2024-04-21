@@ -69,8 +69,9 @@ use smithay::{
             control::{connector, crtc, Device, ModeTypeFlags},
             Device as _,
         },
+        gbm::Modifier,
         input::{DeviceCapability, Libinput},
-        rustix::fs::OFlags,
+        rustix::{self, fs::OFlags},
         wayland_protocols::wp::{
             linux_dmabuf::zv1::server::zwp_linux_dmabuf_feedback_v1,
             presentation_time::server::wp_presentation_feedback,
@@ -684,7 +685,8 @@ impl SurfaceComposition {
                     if let PrimaryPlaneElement::Swapchain(element) = render_frame_result.primary_element {
                         element.sync.wait();
                     }
-                    let presentation_mode = render_frame_result.presentation_mode();
+                    // let presentation_mode = render_frame_result.presentation_mode();
+                    let presentation_mode = PresentationMode::Async;
                     SurfaceCompositorRenderResult {
                         rendered: !render_frame_result.is_empty,
                         damage: None,
@@ -784,11 +786,13 @@ fn get_surface_dmabuf_feedback(
         .single_renderer(&render_node)
         .ok()?
         .dmabuf_formats()
+        .filter(|f| f.modifier == Modifier::Linear)
         .collect::<HashSet<_>>();
 
     let all_render_formats = primary_formats
         .iter()
         .chain(render_formats.iter())
+        .filter(|f| f.modifier == Modifier::Linear)
         .copied()
         .collect::<HashSet<_>>();
 
@@ -913,7 +917,14 @@ impl AnvilState<UdevData> {
             .gpus
             .single_renderer(&device.render_node)
             .unwrap();
-        let render_formats = renderer.as_mut().egl_context().dmabuf_render_formats().clone();
+        let render_formats = renderer
+            .as_mut()
+            .egl_context()
+            .dmabuf_render_formats()
+            .iter()
+            .filter(|f| f.modifier == Modifier::Linear)
+            .copied()
+            .collect();
 
         let output_name = format!("{}-{}", connector.interface().as_str(), connector.interface_id());
         info!(?crtc, "Trying to setup connector {}", output_name,);
@@ -1460,6 +1471,7 @@ impl AnvilState<UdevData> {
                         Some(DrmError::DeviceInactive) => true,
                         Some(DrmError::Access(DrmAccessError { source, .. })) => {
                             source.kind() == io::ErrorKind::PermissionDenied
+                                || source.raw_os_error() == Some(rustix::io::Errno::BUSY.raw_os_error())
                         }
                         _ => false,
                     },

@@ -88,7 +88,7 @@ impl From<Error> for SwapBuffersError {
             }) if matches!(
                 source.kind(),
                 ErrorKind::PermissionDenied | ErrorKind::WouldBlock | ErrorKind::Interrupted
-            ) =>
+            ) || source.raw_os_error() == Some(libc::EBUSY) =>
             {
                 SwapBuffersError::TemporaryFailure(Box::new(Error::Access(AccessError {
                     errmsg,
