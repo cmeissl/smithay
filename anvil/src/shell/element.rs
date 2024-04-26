@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{borrow::Cow, time::Duration};
 
 use smithay::{
     backend::renderer::{
@@ -120,7 +120,7 @@ impl WindowElement {
         self.0.is_wayland()
     }
 
-    pub fn wl_surface(&self) -> Option<WlSurface> {
+    pub fn wl_surface(&self) -> Option<Cow<'_, WlSurface>> {
         self.0.wl_surface()
     }
 
@@ -145,7 +145,7 @@ impl IsAlive for SSD {
 }
 
 impl WaylandFocus for SSD {
-    fn wl_surface(&self) -> Option<WlSurface> {
+    fn wl_surface(&self) -> Option<Cow<'_, WlSurface>> {
         self.0.wl_surface()
     }
 }

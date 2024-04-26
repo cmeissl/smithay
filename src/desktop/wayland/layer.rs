@@ -18,10 +18,7 @@ use wayland_protocols::wp::presentation_time::server::wp_presentation_feedback;
 use wayland_server::protocol::wl_surface::{self, WlSurface};
 
 use std::{
-    cell::{RefCell, RefMut},
-    hash::{Hash, Hasher},
-    sync::Arc,
-    time::Duration,
+    borrow::Cow, cell::{RefCell, RefMut}, hash::{Hash, Hasher}, sync::Arc, time::Duration
 };
 
 use crate::desktop::WindowSurfaceType;
@@ -705,7 +702,7 @@ impl LayerSurface {
 }
 
 impl WaylandFocus for LayerSurface {
-    fn wl_surface(&self) -> Option<wl_surface::WlSurface> {
-        Some(self.0.surface.wl_surface().clone())
+    fn wl_surface(&self) -> Option<Cow<'_, wl_surface::WlSurface>> {
+        Some(Cow::Borrowed(self.0.surface.wl_surface()))
     }
 }
