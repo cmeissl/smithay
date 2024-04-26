@@ -11,9 +11,93 @@ use super::{
 #[cfg(feature = "backend_drm")]
 use crate::backend::drm::DrmNode;
 use crate::utils::{Buffer as BufferCoords, Size};
-pub use gbm::{BufferObject as GbmBuffer, BufferObjectFlags as GbmBufferFlags, Device as GbmDevice};
+use drm::buffer::PlanarBuffer;
+use gbm::BufferObject;
+pub use gbm::{BufferObjectFlags as GbmBufferFlags, Device as GbmDevice};
 use std::os::unix::io::{AsFd, BorrowedFd};
 use tracing::instrument;
+
+#[derive(Debug)]
+pub struct GbmBuffer {
+    bo: BufferObject<()>,
+    size: Size<i32, BufferCoords>,
+    format: Format,
+}
+
+impl PlanarBuffer for GbmBuffer {
+    fn size(&self) -> (u32, u32) {
+        (self.size.w as u32, self.size.h as u32)
+    }
+
+    fn format(&self) -> Fourcc {
+        self.format.code
+    }
+
+    fn modifier(&self) -> Option<Modifier> {
+        match self.format.modifier {
+            Modifier::Invalid => None,
+            x => Some(x),
+        }
+    }
+
+    fn pitches(&self) -> [u32; 4] {
+        self.bo.pitches()
+    }
+
+    fn handles(&self) -> [Option<drm::buffer::Handle>; 4] {
+        self.bo.handles()
+    }
+
+    fn offsets(&self) -> [u32; 4] {
+        self.bo.offsets()
+    }
+}
+
+impl drm::buffer::Buffer for GbmBuffer {
+    fn size(&self) -> (u32, u32) {
+        (self.size.w as u32, self.size.h as u32)
+    }
+
+    fn format(&self) -> Fourcc {
+        self.format.code
+    }
+
+    fn pitch(&self) -> u32 {
+        self.bo.pitch()
+    }
+
+    fn handle(&self) -> drm::buffer::Handle {
+        drm::buffer::Buffer::handle(&self.bo)
+    }
+}
+
+impl GbmBuffer {
+    pub fn from_bo(bo: BufferObject<()>) -> Self {
+        let size = (bo.width().unwrap_or(0) as i32, bo.height().unwrap_or(0) as i32).into();
+        let format = Format {
+            // FIXME: self.format() calls drm_fourcc::Format::try_from which would be a good candidate for inline, but it is not. Fix in drm_fourcc
+            // Also we should think about caching the format and modifier, it should probably not change during runtime...same for all fields actually
+            // as those upgrade a weak each time
+            code: bo.format().unwrap_or(Fourcc::Argb8888), // we got to return something, but this should never happen anyway
+            modifier: bo.modifier().unwrap_or(Modifier::Invalid),
+        };
+        Self { bo, size, format }
+    }
+}
+
+impl std::ops::Deref for GbmBuffer {
+    type Target = BufferObject<()>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.bo
+    }
+}
+
+impl std::ops::DerefMut for GbmBuffer {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.bo
+    }
+}
 
 /// Light wrapper around an [`GbmDevice`] to implement the [`Allocator`]-trait
 #[derive(Clone, Debug)]
@@ -61,7 +145,7 @@ impl<A: AsFd + 'static> GbmAllocator<A> {
         fourcc: Fourcc,
         modifiers: &[Modifier],
         flags: GbmBufferFlags,
-    ) -> Result<GbmBuffer<()>, std::io::Error> {
+    ) -> Result<GbmBuffer, std::io::Error> {
         #[cfg(feature = "backend_gbm_has_create_with_modifiers2")]
         let result = self.device.create_buffer_object_with_modifiers2(
             width,
@@ -85,10 +169,12 @@ impl<A: AsFd + 'static> GbmAllocator<A> {
         };
 
         match result {
-            Ok(bo) => Ok(bo),
+            Ok(bo) => Ok(GbmBuffer::from_bo(bo)),
             Err(err) => {
                 if modifiers.contains(&Modifier::Invalid) || modifiers.contains(&Modifier::Linear) {
-                    self.device.create_buffer_object(width, height, fourcc, flags)
+                    self.device
+                        .create_buffer_object(width, height, fourcc, flags)
+                        .map(|bo| GbmBuffer::from_bo(bo))
                 } else {
                     Err(err)
                 }
@@ -98,7 +184,7 @@ impl<A: AsFd + 'static> GbmAllocator<A> {
 }
 
 impl<A: AsFd + 'static> Allocator for GbmAllocator<A> {
-    type Buffer = GbmBuffer<()>;
+    type Buffer = GbmBuffer;
     type Error = std::io::Error;
 
     #[profiling::function]
@@ -108,28 +194,18 @@ impl<A: AsFd + 'static> Allocator for GbmAllocator<A> {
         height: u32,
         fourcc: Fourcc,
         modifiers: &[Modifier],
-    ) -> Result<GbmBuffer<()>, Self::Error> {
+    ) -> Result<GbmBuffer, Self::Error> {
         self.create_buffer_with_flags(width, height, fourcc, modifiers, self.default_flags)
     }
 }
 
-impl<T> Buffer for GbmBuffer<T> {
+impl Buffer for GbmBuffer {
     fn size(&self) -> Size<i32, BufferCoords> {
-        (
-            self.width().unwrap_or(0) as i32,
-            self.height().unwrap_or(0) as i32,
-        )
-            .into()
+        self.size
     }
 
     fn format(&self) -> Format {
-        Format {
-            // FIXME: self.format() calls drm_fourcc::Format::try_from which would be a good candidate for inline, but it is not. Fix in drm_fourcc
-            // Also we should think about caching the format and modifier, it should probably not change during runtime...same for all fields actually
-            // as those upgrade a weak each time
-            code: self.format().unwrap_or(Fourcc::Argb8888), // we got to return something, but this should never happen anyway
-            modifier: self.modifier().unwrap_or(Modifier::Invalid),
-        }
+        self.format
     }
 }
 
@@ -156,7 +232,7 @@ impl From<gbm::FdError> for GbmConvertError {
     }
 }
 
-impl<T> AsDmabuf for GbmBuffer<T> {
+impl AsDmabuf for GbmBuffer {
     type Error = GbmConvertError;
 
     #[cfg(feature = "backend_gbm_has_fd_for_plane")]
@@ -234,11 +310,11 @@ impl<T> AsDmabuf for GbmBuffer<T> {
 impl Dmabuf {
     /// Import a Dmabuf using libgbm, creating a gbm Buffer Object to the same underlying data.
     #[profiling::function]
-    pub fn import_to<A: AsFd + 'static, T>(
+    pub fn import_to<A: AsFd + 'static>(
         &self,
         gbm: &GbmDevice<A>,
         usage: GbmBufferFlags,
-    ) -> std::io::Result<GbmBuffer<T>> {
+    ) -> std::io::Result<GbmBuffer> {
         let mut handles = [None; MAX_PLANES];
         for (i, handle) in self.handles().take(MAX_PLANES).enumerate() {
             handles[i] = Some(handle);
@@ -264,6 +340,7 @@ impl Dmabuf {
                 offsets,
                 self.format().modifier,
             )
+            .map(GbmBuffer::from_bo)
         } else {
             gbm.import_buffer_object_from_dma_buf(
                 handles[0].unwrap(),
@@ -277,6 +354,7 @@ impl Dmabuf {
                     usage
                 },
             )
+            .map(GbmBuffer::from_bo)
         }
     }
 }
