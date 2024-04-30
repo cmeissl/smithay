@@ -503,7 +503,7 @@ impl<B> Clone for PlaneState<B> {
 
 #[derive(Debug)]
 struct FrameState<B: AsRef<framebuffer::Handle>> {
-    planes: Vec<(plane::Handle, PlaneState<B>)>,
+    planes: SmallVec<[(plane::Handle, PlaneState<B>); 10]>,
 }
 
 impl<B: AsRef<framebuffer::Handle>> FrameState<B> {
@@ -601,8 +601,7 @@ impl<B> Clone for Owned<B> {
 impl<B: Framebuffer> FrameState<B> {
     fn from_planes(planes: &Planes) -> Self {
         let cursor_plane_count = usize::from(planes.cursor.is_some());
-        // FIXME: We can cache that somewhere and get rid of this allocation in the hot path
-        let mut tmp = Vec::with_capacity(planes.overlay.len() + cursor_plane_count + 1);
+        let mut tmp = SmallVec::with_capacity(planes.overlay.len() + cursor_plane_count + 1);
         tmp.push((planes.primary.handle, PlaneState::default()));
         if let Some(info) = planes.cursor.as_ref() {
             tmp.push((info.handle, PlaneState::default()));
