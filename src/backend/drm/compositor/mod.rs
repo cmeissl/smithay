@@ -161,7 +161,7 @@ use crate::{
                 RenderElementStates, RenderingReason, UnderlyingStorage,
             },
             sync::SyncPoint,
-            utils::{CommitCounter, DamageBag, DamageSet, DamageSnapshot},
+            utils::{CommitCounter, DamageBag, DamageSet, DamageSnapshot, OpaqueRegions},
             Bind, Blit, DebugFlags, Frame as RendererFrame, Renderer, Texture,
         },
         SwapBuffersError,
@@ -994,8 +994,8 @@ impl<'a, 'b, B: Buffer> Element for SwapchainElement<'a, 'b, B> {
             .unwrap_or_else(|| DamageSet::from_slice(&[self.geometry(scale)]))
     }
 
-    fn opaque_regions(&self, scale: Scale<f64>) -> Vec<Rectangle<i32, Physical>> {
-        vec![self.geometry(scale)]
+    fn opaque_regions(&self, scale: Scale<f64>) -> OpaqueRegions<i32, Physical> {
+        OpaqueRegions::from_slice(&[self.geometry(scale)])
     }
 }
 
@@ -1058,7 +1058,7 @@ where
         }
     }
 
-    fn opaque_regions(&self, scale: Scale<f64>) -> Vec<Rectangle<i32, Physical>> {
+    fn opaque_regions(&self, scale: Scale<f64>) -> OpaqueRegions<i32, Physical> {
         match self {
             FrameResultDamageElement::Element(e) => e.opaque_regions(scale),
             FrameResultDamageElement::Swapchain(e) => e.opaque_regions(scale),

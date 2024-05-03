@@ -226,8 +226,8 @@ use wayland_server::protocol::wl_surface;
 use crate::{
     backend::renderer::{
         utils::{
-            Buffer, DamageSet, DamageSnapshot, RendererSurfaceState, RendererSurfaceStateUserData,
-            SurfaceView,
+            Buffer, DamageSet, DamageSnapshot, OpaqueRegions, RendererSurfaceState,
+            RendererSurfaceStateUserData, SurfaceView,
         },
         Frame, ImportAll, Renderer, Texture,
     },
@@ -321,7 +321,7 @@ pub struct WaylandSurfaceRenderElement<R: Renderer> {
     buffer_transform: Transform,
     buffer_dimensions: Size<i32, BufferCoords>,
     damage: DamageSnapshot<i32, BufferCoords>,
-    opaque_regions: Vec<Rectangle<i32, Logical>>,
+    opaque_regions: OpaqueRegions<i32, Logical>,
     texture: R::TextureId,
 }
 
@@ -382,11 +382,14 @@ impl<R: Renderer + ImportAll> WaylandSurfaceRenderElement<R> {
             kind,
             view: data.view()?,
             buffer: data.buffer()?.clone(),
-            buffer_scale: data.buffer_scale,
-            buffer_transform: data.buffer_transform,
+            buffer_scale: data.buffer_scale(),
+            buffer_transform: data.buffer_transform(),
             buffer_dimensions: data.buffer_dimensions?,
             damage: data.damage.snapshot(),
-            opaque_regions: data.opaque_regions.clone(),
+            opaque_regions: data
+                .opaque_regions()
+                .map(|regions| OpaqueRegions::from_slice(regions))
+                .unwrap_or_default(),
             texture: data.texture::<R>(renderer.id())?.clone(),
         })
     }
@@ -476,9 +479,9 @@ impl<R: Renderer + ImportAll> Element for WaylandSurfaceRenderElement<R> {
             .collect::<DamageSet<_, _>>()
     }
 
-    fn opaque_regions(&self, scale: Scale<f64>) -> Vec<Rectangle<i32, Physical>> {
+    fn opaque_regions(&self, scale: Scale<f64>) -> OpaqueRegions<i32, Physical> {
         if self.alpha < 1.0 {
-            return Vec::new();
+            return OpaqueRegions::default();
         }
 
         self.opaque_regions
@@ -490,7 +493,7 @@ impl<R: Renderer + ImportAll> Element for WaylandSurfaceRenderElement<R> {
                 .to_size();
                 Rectangle::from_loc_and_size(loc, size)
             })
-            .collect::<Vec<_>>()
+            .collect::<OpaqueRegions<_, _>>()
     }
 
     fn alpha(&self) -> f32 {
