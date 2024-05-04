@@ -204,6 +204,7 @@ enum ScanoutBuffer<B: Buffer> {
 }
 
 impl<B: Buffer> ScanoutBuffer<B> {
+    #[inline]
     fn from_underlying_storage(storage: UnderlyingStorage) -> Option<Self> {
         match storage {
             UnderlyingStorage::Wayland(buffer) => Some(Self::Wayland(buffer)),
@@ -221,6 +222,7 @@ impl<F> AsRef<framebuffer::Handle> for DrmFramebuffer<F>
 where
     F: Framebuffer,
 {
+    #[inline]
     fn as_ref(&self) -> &framebuffer::Handle {
         match self {
             DrmFramebuffer::Exporter(e) => e.as_ref(),
@@ -233,6 +235,7 @@ impl<F> Framebuffer for DrmFramebuffer<F>
 where
     F: Framebuffer,
 {
+    #[inline]
     fn format(&self) -> drm_fourcc::DrmFormat {
         match self {
             DrmFramebuffer::Exporter(e) => e.format(),
@@ -272,12 +275,14 @@ where
 }
 
 impl<B: Buffer, F: Framebuffer> AsRef<framebuffer::Handle> for DrmScanoutBuffer<B, F> {
+    #[inline]
     fn as_ref(&self) -> &drm::control::framebuffer::Handle {
         self.fb.as_ref()
     }
 }
 
 impl<B: Buffer, F: Framebuffer> Framebuffer for DrmScanoutBuffer<B, F> {
+    #[inline]
     fn format(&self) -> drm_fourcc::DrmFormat {
         self.fb.format()
     }
@@ -289,6 +294,7 @@ enum ElementFramebufferCacheBuffer {
 }
 
 impl ElementFramebufferCacheBuffer {
+    #[inline]
     fn from_underlying_storage(storage: &UnderlyingStorage) -> Option<Self> {
         match storage {
             UnderlyingStorage::Wayland(buffer) => Some(Self::Wayland(buffer.downgrade())),
@@ -304,6 +310,8 @@ struct ElementFramebufferCacheKey {
 }
 
 impl ElementFramebufferCacheKey {
+    #[profiling::function]
+    #[inline]
     fn from_underlying_storage(storage: &UnderlyingStorage, allow_opaque_fallback: bool) -> Option<Self> {
         let buffer = ElementFramebufferCacheBuffer::from_underlying_storage(storage)?;
         Some(Self {
@@ -314,6 +322,8 @@ impl ElementFramebufferCacheKey {
 }
 
 impl ElementFramebufferCacheKey {
+    #[profiling::function]
+    #[inline]
     fn is_alive(&self) -> bool {
         match self.buffer {
             ElementFramebufferCacheBuffer::Wayland(ref buffer) => buffer.upgrade().is_ok(),
@@ -347,30 +357,41 @@ where
     B: Framebuffer,
 {
     /// Cache for framebuffer handles per cache key (e.g. wayland buffer)
-    fb_cache: HashMap<ElementFramebufferCacheKey, Result<OwnedFramebuffer<B>, ExportBufferError>>,
+    fb_cache: SmallVec<
+        [(
+            ElementFramebufferCacheKey,
+            Result<OwnedFramebuffer<B>, ExportBufferError>,
+        ); 4],
+    >,
 }
 
 impl<B> ElementFramebufferCache<B>
 where
     B: Framebuffer,
 {
+    #[profiling::function]
+    #[inline]
     fn get(
         &self,
         cache_key: &ElementFramebufferCacheKey,
     ) -> Option<Result<OwnedFramebuffer<B>, ExportBufferError>> {
-        self.fb_cache.get(cache_key).cloned()
+        self.fb_cache
+            .iter()
+            .find_map(|(k, r)| if k == cache_key { Some(r.clone()) } else { None })
     }
 
+    #[inline]
     fn insert(
         &mut self,
         cache_key: ElementFramebufferCacheKey,
         fb: Result<OwnedFramebuffer<B>, ExportBufferError>,
     ) {
-        self.fb_cache.insert(cache_key, fb);
+        self.fb_cache.push((cache_key, fb));
     }
 
+    #[profiling::function]
     fn cleanup(&mut self) {
-        self.fb_cache.retain(|key, _| key.is_alive());
+        self.fb_cache.retain(|(key, _)| key.is_alive());
     }
 }
 
@@ -378,6 +399,7 @@ impl<B> Clone for ElementFramebufferCache<B>
 where
     B: Framebuffer,
 {
+    #[inline]
     fn clone(&self) -> Self {
         Self {
             fb_cache: self.fb_cache.clone(),
@@ -389,6 +411,7 @@ impl<B> Default for ElementFramebufferCache<B>
 where
     B: Framebuffer,
 {
+    #[inline]
     fn default() -> Self {
         Self {
             fb_cache: Default::default(),
@@ -406,6 +429,7 @@ struct PlaneProperties {
 }
 
 impl PlaneProperties {
+    #[inline]
     fn is_compatible(&self, other: &PlaneProperties) -> bool {
         self.src == other.src
             && self.dst == other.dst
@@ -433,12 +457,14 @@ struct PlaneConfig<B> {
 }
 
 impl<B> PlaneConfig<B> {
+    #[inline]
     pub fn is_compatible(&self, other: &PlaneConfig<B>) -> bool {
         self.properties.is_compatible(&other.properties)
     }
 }
 
 impl<B> Clone for PlaneConfig<B> {
+    #[inline]
     fn clone(&self) -> Self {
         Self {
             properties: self.properties,
@@ -466,6 +492,7 @@ struct PlaneState<B> {
 }
 
 impl<B> Default for PlaneState<B> {
+    #[inline]
     fn default() -> Self {
         Self {
             skip: true,
@@ -477,10 +504,12 @@ impl<B> Default for PlaneState<B> {
 }
 
 impl<B> PlaneState<B> {
+    #[inline]
     fn buffer(&self) -> Option<&B> {
         self.config.as_ref().map(|config| &*config.buffer)
     }
 
+    #[inline]
     fn is_compatible(&self, other: &Self) -> bool {
         match (self.config.as_ref(), other.config.as_ref()) {
             (Some(a), Some(b)) => a.is_compatible(b),
@@ -491,6 +520,7 @@ impl<B> PlaneState<B> {
 }
 
 impl<B> Clone for PlaneState<B> {
+    #[inline]
     fn clone(&self) -> Self {
         Self {
             skip: self.skip,
@@ -507,6 +537,8 @@ struct FrameState<B: AsRef<framebuffer::Handle>> {
 }
 
 impl<B: AsRef<framebuffer::Handle>> FrameState<B> {
+    #[profiling::function]
+    #[inline]
     fn is_assigned(&self, handle: plane::Handle) -> bool {
         self.planes
             .iter()
@@ -520,6 +552,7 @@ impl<B: AsRef<framebuffer::Handle>> FrameState<B> {
             .unwrap_or(false)
     }
 
+    #[inline]
     fn overlaps(&self, handle: plane::Handle, element_geometry: Rectangle<i32, Physical>) -> bool {
         self.planes
             .iter()
@@ -533,24 +566,28 @@ impl<B: AsRef<framebuffer::Handle>> FrameState<B> {
             .unwrap_or(false)
     }
 
+    #[inline]
     fn plane_state(&self, handle: plane::Handle) -> Option<&PlaneState<B>> {
         self.planes
             .iter()
             .find_map(|(p, state)| if *p == handle { Some(state) } else { None })
     }
 
+    #[inline]
     fn plane_state_mut(&mut self, handle: plane::Handle) -> Option<&mut PlaneState<B>> {
         self.planes
             .iter_mut()
             .find_map(|(p, state)| if *p == handle { Some(state) } else { None })
     }
 
+    #[inline]
     fn plane_properties(&self, handle: plane::Handle) -> Option<&PlaneProperties> {
         self.plane_state(handle)
             .and_then(|state| state.config.as_ref())
             .map(|config| &config.properties)
     }
 
+    #[inline]
     fn plane_buffer(&self, handle: plane::Handle) -> Option<&B> {
         self.plane_state(handle)
             .and_then(|state| state.config.as_ref().map(|config| &*config.buffer))
@@ -563,12 +600,14 @@ struct Owned<B>(Rc<B>);
 impl<B> std::ops::Deref for Owned<B> {
     type Target = B;
 
+    #[inline]
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
 impl<B> From<B> for Owned<B> {
+    #[inline]
     fn from(outer: B) -> Self {
         Self(Rc::new(outer))
     }
@@ -578,6 +617,7 @@ impl<B> AsRef<framebuffer::Handle> for Owned<B>
 where
     B: Framebuffer,
 {
+    #[inline]
     fn as_ref(&self) -> &framebuffer::Handle {
         (*self.0).as_ref()
     }
@@ -587,12 +627,14 @@ impl<B> Framebuffer for Owned<B>
 where
     B: Framebuffer,
 {
+    #[inline]
     fn format(&self) -> drm_fourcc::DrmFormat {
         (*self.0).format()
     }
 }
 
 impl<B> Clone for Owned<B> {
+    #[inline]
     fn clone(&self) -> Self {
         Self(self.0.clone())
     }
@@ -619,6 +661,7 @@ impl<B: Framebuffer> FrameState<B> {
 
 impl<B: Framebuffer> FrameState<B> {
     #[profiling::function]
+    #[inline]
     fn set_state(&mut self, plane: plane::Handle, state: PlaneState<B>) {
         let current_config = match self.plane_state_mut(plane) {
             Some(config) => config,
@@ -787,6 +830,7 @@ pub enum ExportBuffer<'a, B: Buffer> {
 }
 
 impl<'a, B: Buffer> ExportBuffer<'a, B> {
+    #[inline]
     fn from_underlying_storage(storage: &'a UnderlyingStorage) -> Option<Self> {
         match storage {
             UnderlyingStorage::Wayland(buffer) => Some(Self::Wayland(buffer)),
@@ -823,6 +867,7 @@ where
     type Framebuffer = <F as ExportFramebuffer<B>>::Framebuffer;
     type Error = <F as ExportFramebuffer<B>>::Error;
 
+    #[inline]
     fn add_framebuffer(
         &self,
         drm: &DrmDeviceFd,
@@ -842,6 +887,7 @@ where
     type Framebuffer = <F as ExportFramebuffer<B>>::Framebuffer;
     type Error = <F as ExportFramebuffer<B>>::Error;
 
+    #[inline]
     fn add_framebuffer(
         &self,
         drm: &DrmDeviceFd,
@@ -889,6 +935,7 @@ pub struct PrimarySwapchainElement<B: Buffer, F: Framebuffer> {
 
 impl<B: Buffer, F: Framebuffer> PrimarySwapchainElement<B, F> {
     /// Access the underlying swapchain buffer
+    #[inline]
     pub fn buffer(&self) -> &B {
         match &self.slot.0.buffer {
             ScanoutBuffer::Swapchain(slot) => slot,
@@ -1396,6 +1443,7 @@ struct PlaneAssignment {
 }
 
 impl From<&PlaneInfo> for PlaneAssignment {
+    #[inline]
     fn from(value: &PlaneInfo) -> Self {
         PlaneAssignment {
             handle: value.handle,
@@ -1458,6 +1506,7 @@ struct PreparedFrame<A: Allocator, F: ExportFramebuffer<<A as Allocator>::Buffer
 }
 
 impl<A: Allocator, F: ExportFramebuffer<<A as Allocator>::Buffer>> PreparedFrame<A, F> {
+    #[inline]
     fn is_empty(&self) -> bool {
         // It can happen that we have no changes, but there is a pending commit or
         // we are forced to do a full update in which case we just set the previous state again
@@ -1927,6 +1976,7 @@ where
             .userdata()
             .get::<OwnedFramebuffer<DrmFramebuffer<<F as ExportFramebuffer<A::Buffer>>::Framebuffer>>>();
         if maybe_buffer.is_none() {
+            profiling::scope!("swapchain_init_fb");
             let fb_buffer = self
                 .framebuffer_exporter
                 .add_framebuffer(
@@ -1959,6 +2009,7 @@ where
         // So first we want to create a clean state, for that we have to reset all overlay and cursor planes
         // to nothing. We only want to test if the primary plane alone can be used for scan-out.
         let mut next_frame_state = {
+            profiling::scope!("init_next_frame_state");
             let previous_state = self
                 .pending_frame
                 .as_ref()
@@ -2795,25 +2846,7 @@ where
         E: RenderElement<R>,
     {
         // Check if we have a free plane, otherwise we can exit early
-        if !self.direct_scanout
-            || ((self.planes.overlay.is_empty()
-                || self
-                    .planes
-                    .overlay
-                    .iter()
-                    .all(|plane| frame_state.is_assigned(plane.handle)))
-                && self
-                    .planes
-                    .cursor
-                    .as_ref()
-                    .map(|plane| frame_state.is_assigned(plane.handle))
-                    .unwrap_or(true)
-                && (!try_assign_primary_plane
-                    || frame_state
-                        .plane_state(self.planes.primary.handle)
-                        .map(|state| state.element_state.is_some())
-                        .unwrap_or(true)))
-        {
+        if !self.direct_scanout {
             trace!(
                 "skipping direct scan-out for element {:?}, no free planes",
                 element.id()
@@ -2910,6 +2943,14 @@ where
         R: Renderer,
         E: RenderElement<R>,
     {
+        if frame_state
+            .plane_state(self.planes.primary.handle)
+            .map(|state| state.element_state.is_some())
+            .unwrap_or(true)
+        {
+            return Err(None);
+        }
+
         let element_config = self.element_config(
             renderer,
             element,
@@ -3382,6 +3423,7 @@ where
         // we got the same id multiple times. If we can't find it we use the previous
         // state if available
         if !element_states.contains_key(element_id) {
+            profiling::scope!("init_state");
             let previous_fb_cache = self
                 .previous_element_states
                 .get_mut(element_id)
@@ -3408,6 +3450,7 @@ where
         let cached_fb = element_fb_cache.get(&element_cache_key);
 
         if cached_fb.is_none() {
+            profiling::scope!("export_fb");
             trace!(
                 "no cached fb, exporting new fb for element {:?} underlying storage {:?}",
                 element_id,
@@ -3610,12 +3653,11 @@ where
         let element_id = element.id();
 
         // Check if we have a free plane, otherwise we can exit early
-        if self.planes.overlay.is_empty()
-            || self
-                .planes
-                .overlay
-                .iter()
-                .all(|plane| frame_state.is_assigned(plane.handle))
+        if self
+            .planes
+            .overlay
+            .iter()
+            .all(|plane| frame_state.is_assigned(plane.handle))
         {
             trace!(
                 "skipping overlay planes for element {:?}, no free planes",
@@ -4141,6 +4183,7 @@ where
 struct OwnedFramebuffer<B: Framebuffer>(Arc<B>);
 
 impl<B: Framebuffer> PartialEq for OwnedFramebuffer<B> {
+    #[inline]
     fn eq(&self, other: &Self) -> bool {
         AsRef::<framebuffer::Handle>::as_ref(&self) == AsRef::<framebuffer::Handle>::as_ref(&other)
     }
@@ -4153,24 +4196,28 @@ impl<B: Framebuffer + std::fmt::Debug> std::fmt::Debug for OwnedFramebuffer<B> {
 }
 
 impl<B: Framebuffer> OwnedFramebuffer<B> {
+    #[inline]
     fn new(buffer: B) -> Self {
         OwnedFramebuffer(Arc::new(buffer))
     }
 }
 
 impl<B: Framebuffer> Clone for OwnedFramebuffer<B> {
+    #[inline]
     fn clone(&self) -> Self {
         Self(self.0.clone())
     }
 }
 
 impl<B: Framebuffer> AsRef<framebuffer::Handle> for OwnedFramebuffer<B> {
+    #[inline]
     fn as_ref(&self) -> &framebuffer::Handle {
         (*self.0).as_ref()
     }
 }
 
 impl<B: Framebuffer> Framebuffer for OwnedFramebuffer<B> {
+    #[inline]
     fn format(&self) -> drm_fourcc::DrmFormat {
         (*self.0).format()
     }
@@ -4255,6 +4302,7 @@ impl<
         F: std::error::Error + Send + Sync + 'static,
     > From<FrameError<A, B, F>> for SwapBuffersError
 {
+    #[inline]
     fn from(err: FrameError<A, B, F>) -> SwapBuffersError {
         match err {
             x @ FrameError::NoSupportedPlaneFormat

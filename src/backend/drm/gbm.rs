@@ -31,28 +31,31 @@ use super::{error::AccessError, warn_legacy_fb_export, Framebuffer};
 /// A GBM backed framebuffer
 #[derive(Debug)]
 pub struct GbmFramebuffer {
-    _bo: Option<GbmBuffer>,
     fb: framebuffer::Handle,
     format: drm_fourcc::DrmFormat,
     drm: DrmDeviceFd,
 }
 
 impl Drop for GbmFramebuffer {
+    #[profiling::function]
     fn drop(&mut self) {
         trace!(fb = ?self.fb, "destroying framebuffer");
         if let Err(err) = self.drm.destroy_framebuffer(self.fb) {
             warn!(fb = ?self.fb, ?err, "failed to destroy framebuffer");
         }
+        //let _ = self._bo.take();
     }
 }
 
 impl AsRef<framebuffer::Handle> for GbmFramebuffer {
+    #[inline]
     fn as_ref(&self) -> &framebuffer::Handle {
         &self.fb
     }
 }
 
 impl Framebuffer for GbmFramebuffer {
+    #[inline]
     fn format(&self) -> drm_fourcc::DrmFormat {
         self.format
     }
@@ -108,7 +111,6 @@ pub fn framebuffer_from_wayland_buffer<A: AsFd + 'static>(
         .map_err(Error::Drm)?;
 
         return Ok(Some(GbmFramebuffer {
-            _bo: Some(bo),
             fb,
             format,
             drm: drm.clone(),
@@ -169,7 +171,6 @@ pub fn framebuffer_from_dmabuf<A: AsFd + 'static>(
     )
     .map_err(Error::Drm)
     .map(|(fb, format)| GbmFramebuffer {
-        _bo: Some(bo),
         fb,
         format,
         drm: drm.clone(),
@@ -193,7 +194,6 @@ pub fn framebuffer_from_bo(
         use_opaque,
     )
     .map(|(fb, format)| GbmFramebuffer {
-        _bo: None,
         fb,
         format,
         drm: drm.clone(),
@@ -209,32 +209,39 @@ struct BufferObjectInternal<'a> {
 impl<'a> std::ops::Deref for BufferObjectInternal<'a> {
     type Target = GbmBuffer;
 
+    #[inline]
     fn deref(&self) -> &Self::Target {
         self.bo
     }
 }
 
 impl<'a> PlanarBuffer for BufferObjectInternal<'a> {
+    #[inline]
     fn size(&self) -> (u32, u32) {
         PlanarBuffer::size(self.bo)
     }
 
+    #[inline]
     fn format(&self) -> drm_fourcc::DrmFourcc {
         PlanarBuffer::format(self.bo)
     }
 
+    #[inline]
     fn modifier(&self) -> Option<DrmModifier> {
         PlanarBuffer::modifier(self.bo)
     }
 
+    #[inline]
     fn pitches(&self) -> [u32; 4] {
         self.pitches.unwrap_or_else(|| PlanarBuffer::pitches(self.bo))
     }
 
+    #[inline]
     fn handles(&self) -> [Option<drm::buffer::Handle>; 4] {
         PlanarBuffer::handles(self.bo)
     }
 
+    #[inline]
     fn offsets(&self) -> [u32; 4] {
         self.offsets.unwrap_or_else(|| PlanarBuffer::offsets(self.bo))
     }
@@ -245,33 +252,40 @@ impl<'a, B> PlanarBuffer for OpaqueBufferWrapper<'a, B>
 where
     B: PlanarBuffer,
 {
+    #[inline]
     fn size(&self) -> (u32, u32) {
         self.0.size()
     }
 
+    #[inline]
     fn format(&self) -> Fourcc {
         let fmt = self.0.format();
         get_opaque(fmt).unwrap_or(fmt)
     }
 
+    #[inline]
     fn modifier(&self) -> Option<DrmModifier> {
         self.0.modifier()
     }
 
+    #[inline]
     fn pitches(&self) -> [u32; 4] {
         self.0.pitches()
     }
 
+    #[inline]
     fn handles(&self) -> [Option<drm::buffer::Handle>; 4] {
         self.0.handles()
     }
 
+    #[inline]
     fn offsets(&self) -> [u32; 4] {
         self.0.offsets()
     }
 }
 
 #[profiling::function]
+#[inline]
 fn framebuffer_from_bo_internal<D>(
     drm: &D,
     bo: BufferObjectInternal<'_>,

@@ -114,6 +114,7 @@ impl<B: Buffer> Deref for Slot<B> {
 impl<B: Buffer + AsDmabuf> AsDmabuf for Slot<B> {
     type Error = <B as AsDmabuf>::Error;
 
+    #[profiling::function]
     fn export(&self) -> Result<super::dmabuf::Dmabuf, Self::Error> {
         let maybe_dmabuf = self.userdata().get::<Dmabuf>();
         if maybe_dmabuf.is_none() {
