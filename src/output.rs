@@ -440,6 +440,11 @@ impl WeakOutput {
     pub fn upgrade(&self) -> Option<Output> {
         self.inner.upgrade().map(|inner| Output { inner })
     }
+
+    #[inline]
+    pub fn is_alive(&self) -> bool {
+        self.inner.strong_count() != 0
+    }
 }
 
 impl PartialEq for WeakOutput {

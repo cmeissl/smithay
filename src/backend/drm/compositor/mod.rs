@@ -326,7 +326,7 @@ impl ElementFramebufferCacheKey {
     #[inline]
     fn is_alive(&self) -> bool {
         match self.buffer {
-            ElementFramebufferCacheBuffer::Wayland(ref buffer) => buffer.upgrade().is_ok(),
+            ElementFramebufferCacheBuffer::Wayland(ref buffer) => buffer.is_alive(),
         }
     }
 }

@@ -313,7 +313,7 @@ impl Output {
     #[profiling::function]
     pub fn cleanup(&self) {
         let mut inner = self.inner.0.lock().unwrap();
-        inner.surfaces.retain(|s| s.upgrade().is_ok());
+        inner.surfaces.retain(|s| s.is_alive());
     }
 }
 
