@@ -218,7 +218,7 @@
 //! }
 //! ```
 
-use std::fmt;
+use std::{borrow::Cow, fmt};
 
 use tracing::{instrument, warn};
 use wayland_server::protocol::wl_surface;
@@ -510,8 +510,9 @@ where
     R: Renderer + ImportAll,
     <R as Renderer>::TextureId: Texture + 'static,
 {
-    fn underlying_storage(&self, _renderer: &mut R) -> Option<UnderlyingStorage> {
-        Some(UnderlyingStorage::Wayland(self.buffer.clone()))
+    #[inline]
+    fn underlying_storage(&self, _renderer: &mut R) -> Option<UnderlyingStorage<'_>> {
+        Some(UnderlyingStorage::Wayland(Cow::Borrowed(&self.buffer)))
     }
 
     #[instrument(level = "trace", skip(frame))]

@@ -19,7 +19,7 @@
 //! See the [`damage`](crate::backend::renderer::damage) module for more information on
 //! damage tracking.
 
-use std::{collections::HashMap, sync::Arc};
+use std::{borrow::Cow, collections::HashMap, sync::Arc};
 
 #[cfg(feature = "wayland_frontend")]
 use wayland_server::{backend::ObjectId, Resource};
@@ -99,12 +99,12 @@ impl<R: Resource> From<&R> for Id {
 
 /// The underlying storage for a element
 #[derive(Debug, Clone)]
-pub enum UnderlyingStorage {
+pub enum UnderlyingStorage<'a> {
     /// A wayland buffer
     #[cfg(feature = "wayland_frontend")]
-    Wayland(Buffer),
+    Wayland(Cow<'a, Buffer>),
     /// A memory backed buffer
-    Memory(memory::MemoryBuffer),
+    Memory(Cow<'a, memory::MemoryBuffer>),
 }
 
 /// Defines the (optional) reason why a [`Element`] was selected for
@@ -391,7 +391,8 @@ pub trait RenderElement<R: Renderer>: Element {
     ) -> Result<(), R::Error>;
 
     /// Get the underlying storage of this element, may be used to optimize rendering (eg. drm planes)
-    fn underlying_storage(&self, renderer: &mut R) -> Option<UnderlyingStorage> {
+    #[inline]
+    fn underlying_storage(&self, renderer: &mut R) -> Option<UnderlyingStorage<'_>> {
         let _ = renderer;
         None
     }
@@ -464,7 +465,8 @@ where
     R: Renderer,
     E: RenderElement<R> + Element,
 {
-    fn underlying_storage(&self, renderer: &mut R) -> Option<UnderlyingStorage> {
+    #[inline]
+    fn underlying_storage(&self, renderer: &mut R) -> Option<UnderlyingStorage<'_>> {
         (*self).underlying_storage(renderer)
     }
 
@@ -779,7 +781,8 @@ macro_rules! render_elements_internal {
             }
         }
 
-        fn underlying_storage(&self, renderer: &mut $renderer) -> Option<$crate::backend::renderer::element::UnderlyingStorage>
+        #[inline]
+        fn underlying_storage(&self, renderer: &mut $renderer) -> Option<$crate::backend::renderer::element::UnderlyingStorage<'_>>
         {
             match self {
                 $(
@@ -814,7 +817,8 @@ macro_rules! render_elements_internal {
             }
         }
 
-        fn underlying_storage(&self, renderer: &mut $renderer) -> Option<$crate::backend::renderer::element::UnderlyingStorage>
+        #[inline]
+        fn underlying_storage(&self, renderer: &mut $renderer) -> Option<$crate::backend::renderer::element::UnderlyingStorage<'_>>
         {
             match self {
                 $(
@@ -1465,7 +1469,8 @@ where
         self.0.draw(frame, src, dst, damage)
     }
 
-    fn underlying_storage(&self, renderer: &mut R) -> Option<UnderlyingStorage> {
+    #[inline]
+    fn underlying_storage(&self, renderer: &mut R) -> Option<UnderlyingStorage<'_>> {
         self.0.underlying_storage(renderer)
     }
 }

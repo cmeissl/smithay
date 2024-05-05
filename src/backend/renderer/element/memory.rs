@@ -208,12 +208,7 @@
 //! ```
 
 use std::{
-    any::TypeId,
-    cell::{RefCell, RefMut},
-    collections::{hash_map::Entry, HashMap},
-    marker::PhantomData,
-    rc::Rc,
-    sync::Arc,
+    any::TypeId, borrow::Cow, cell::{RefCell, RefMut}, collections::{hash_map::Entry, HashMap}, marker::PhantomData, rc::Rc, sync::Arc
 };
 
 use tracing::{instrument, trace, warn};
@@ -785,8 +780,9 @@ where
         frame.render_texture_from_to(texture, src, dst, damage, transform, self.alpha)
     }
 
-    fn underlying_storage(&self, _renderer: &mut R) -> Option<UnderlyingStorage> {
+    #[inline]
+    fn underlying_storage(&self, _renderer: &mut R) -> Option<UnderlyingStorage<'_>> {
         let buf = self.buffer.inner.borrow();
-        Some(UnderlyingStorage::Memory(buf.mem.clone()))
+        Some(UnderlyingStorage::Memory(Cow::Owned(buf.mem.clone())))
     }
 }

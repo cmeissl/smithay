@@ -103,7 +103,8 @@ impl<R: Renderer, E: RenderElement<R>> RenderElement<R> for RescaleRenderElement
         self.element.draw(frame, src, dst, damage)
     }
 
-    fn underlying_storage(&self, renderer: &mut R) -> Option<UnderlyingStorage> {
+    #[inline]
+    fn underlying_storage(&self, renderer: &mut R) -> Option<UnderlyingStorage<'_>> {
         self.element.underlying_storage(renderer)
     }
 }
@@ -285,7 +286,8 @@ impl<R: Renderer, E: RenderElement<R>> RenderElement<R> for CropRenderElement<E>
         self.element.draw(frame, src, dst, damage)
     }
 
-    fn underlying_storage(&self, renderer: &mut R) -> Option<UnderlyingStorage> {
+    #[inline]
+    fn underlying_storage(&self, renderer: &mut R) -> Option<UnderlyingStorage<'_>> {
         self.element.underlying_storage(renderer)
     }
 }
@@ -385,7 +387,8 @@ impl<R: Renderer, E: RenderElement<R>> RenderElement<R> for RelocateRenderElemen
         self.element.draw(frame, src, dst, damage)
     }
 
-    fn underlying_storage(&self, renderer: &mut R) -> Option<UnderlyingStorage> {
+    #[inline]
+    fn underlying_storage(&self, renderer: &mut R) -> Option<UnderlyingStorage<'_>> {
         self.element.underlying_storage(renderer)
     }
 }

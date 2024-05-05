@@ -205,9 +205,9 @@ enum ScanoutBuffer<B: Buffer> {
 
 impl<B: Buffer> ScanoutBuffer<B> {
     #[inline]
-    fn from_underlying_storage(storage: UnderlyingStorage) -> Option<Self> {
+    fn from_underlying_storage(storage: UnderlyingStorage<'_>) -> Option<Self> {
         match storage {
-            UnderlyingStorage::Wayland(buffer) => Some(Self::Wayland(buffer)),
+            UnderlyingStorage::Wayland(buffer) => Some(Self::Wayland(buffer.into_owned())),
             UnderlyingStorage::Memory { .. } => None,
         }
     }
@@ -295,7 +295,7 @@ enum ElementFramebufferCacheBuffer {
 
 impl ElementFramebufferCacheBuffer {
     #[inline]
-    fn from_underlying_storage(storage: &UnderlyingStorage) -> Option<Self> {
+    fn from_underlying_storage(storage: &UnderlyingStorage<'_>) -> Option<Self> {
         match storage {
             UnderlyingStorage::Wayland(buffer) => Some(Self::Wayland(buffer.downgrade())),
             UnderlyingStorage::Memory { .. } => None,
@@ -312,7 +312,7 @@ struct ElementFramebufferCacheKey {
 impl ElementFramebufferCacheKey {
     #[profiling::function]
     #[inline]
-    fn from_underlying_storage(storage: &UnderlyingStorage, allow_opaque_fallback: bool) -> Option<Self> {
+    fn from_underlying_storage(storage: &UnderlyingStorage<'_>, allow_opaque_fallback: bool) -> Option<Self> {
         let buffer = ElementFramebufferCacheBuffer::from_underlying_storage(storage)?;
         Some(Self {
             allow_opaque_fallback,
@@ -831,7 +831,7 @@ pub enum ExportBuffer<'a, B: Buffer> {
 
 impl<'a, B: Buffer> ExportBuffer<'a, B> {
     #[inline]
-    fn from_underlying_storage(storage: &'a UnderlyingStorage) -> Option<Self> {
+    fn from_underlying_storage(storage: &'a UnderlyingStorage<'_>) -> Option<Self> {
         match storage {
             UnderlyingStorage::Wayland(buffer) => Some(Self::Wayland(buffer)),
             UnderlyingStorage::Memory { .. } => None,
@@ -857,6 +857,8 @@ where
         buffer: ExportBuffer<'_, B>,
         use_opaque: bool,
     ) -> Result<Option<Self::Framebuffer>, Self::Error>;
+
+    fn can_add_framebuffer(&self, buffer: &ExportBuffer<'_, B>) -> bool;
 }
 
 impl<F, B> ExportFramebuffer<B> for Arc<Mutex<F>>
@@ -877,6 +879,12 @@ where
         let guard = self.lock().unwrap();
         guard.add_framebuffer(drm, buffer, use_opaque)
     }
+
+    #[inline]
+    fn can_add_framebuffer(&self, buffer: &ExportBuffer<'_, B>) -> bool {
+        let guard = self.lock().unwrap();
+        guard.can_add_framebuffer(buffer)
+    }
 }
 
 impl<F, B> ExportFramebuffer<B> for Rc<RefCell<F>>
@@ -895,6 +903,11 @@ where
         use_opaque: bool,
     ) -> Result<Option<Self::Framebuffer>, Self::Error> {
         self.borrow().add_framebuffer(drm, buffer, use_opaque)
+    }
+
+    #[inline]
+    fn can_add_framebuffer(&self, buffer: &ExportBuffer<'_, B>) -> bool {
+        self.borrow().can_add_framebuffer(buffer)
     }
 }
 
@@ -3419,6 +3432,13 @@ where
             .underlying_storage(renderer)
             .ok_or(ExportBufferError::NoUnderlyingStorage)?;
 
+        let export_buffer = ExportBuffer::from_underlying_storage(&underlying_storage)
+            .ok_or(ExportBufferError::Unsupported)?;
+
+        if !self.framebuffer_exporter.can_add_framebuffer(&export_buffer) {
+            return Err(ExportBufferError::Unsupported);
+        }
+
         // First we try to find a state in our new states, this is important if
         // we got the same id multiple times. If we can't find it we use the previous
         // state if available
@@ -3439,6 +3459,7 @@ where
                 },
             );
         }
+
         let element_fb_cache = element_states
             .get_mut(element_id)
             .map(|state| &mut state.fb_cache)
@@ -3457,19 +3478,16 @@ where
                 &underlying_storage
             );
 
-            let fb = ExportBuffer::from_underlying_storage(&underlying_storage)
-                .ok_or(ExportBufferError::Unsupported)
-                .and_then(|buffer| {
-                    self.framebuffer_exporter
-                        .add_framebuffer(self.surface.device_fd(), buffer, allow_opaque_fallback)
-                        .map_err(|err| {
-                            trace!("failed to add framebuffer: {:?}", err);
-                            ExportBufferError::ExportFailed
-                        })
-                        .and_then(|fb| {
-                            fb.map(|fb| OwnedFramebuffer::new(DrmFramebuffer::Exporter(fb)))
-                                .ok_or(ExportBufferError::Unsupported)
-                        })
+            let fb = self
+                .framebuffer_exporter
+                .add_framebuffer(self.surface.device_fd(), export_buffer, allow_opaque_fallback)
+                .map_err(|err| {
+                    trace!("failed to add framebuffer: {:?}", err);
+                    ExportBufferError::ExportFailed
+                })
+                .and_then(|fb| {
+                    fb.map(|fb| OwnedFramebuffer::new(DrmFramebuffer::Exporter(fb)))
+                        .ok_or(ExportBufferError::Unsupported)
                 });
 
             if fb.is_err() {
@@ -3994,9 +4012,10 @@ where
     }
 }
 
+#[inline]
 fn apply_underlying_storage_transform(
     element_transform: Transform,
-    storage: &UnderlyingStorage,
+    storage: &UnderlyingStorage<'_>,
 ) -> Transform {
     match storage {
         UnderlyingStorage::Wayland(buffer) => {
@@ -4019,6 +4038,7 @@ fn apply_underlying_storage_transform(
     }
 }
 
+#[inline]
 fn apply_output_transform(transform: Transform, output_transform: Transform) -> Transform {
     match (transform, output_transform) {
         (Transform::Normal, output_transform) => output_transform,
