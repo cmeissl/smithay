@@ -374,10 +374,14 @@ where
     fn get(
         &self,
         cache_key: &ElementFramebufferCacheKey,
-    ) -> Option<Result<OwnedFramebuffer<B>, ExportBufferError>> {
-        self.fb_cache
-            .iter()
-            .find_map(|(k, r)| if k == cache_key { Some(r.clone()) } else { None })
+    ) -> Option<Result<&OwnedFramebuffer<B>, ExportBufferError>> {
+        self.fb_cache.iter().find_map(|(k, r)| {
+            if k == cache_key {
+                Some(r.as_ref().map_err(|err| *err))
+            } else {
+                None
+            }
+        })
     }
 
     #[inline]
@@ -1382,6 +1386,7 @@ enum ExportBufferError {
 }
 
 impl From<ExportBufferError> for Option<RenderingReason> {
+    #[inline]
     fn from(err: ExportBufferError) -> Self {
         if matches!(err, ExportBufferError::ExportFailed) {
             // Export failed could mean the buffer could
@@ -3544,7 +3549,12 @@ where
             format: fb.format(),
         };
         let buffer = ScanoutBuffer::from_underlying_storage(underlying_storage)
-            .map(|buffer| Owned::from(DrmScanoutBuffer { fb, buffer }))
+            .map(|buffer| {
+                Owned::from(DrmScanoutBuffer {
+                    fb: fb.clone(),
+                    buffer,
+                })
+            })
             .ok_or(ExportBufferError::Unsupported)?;
 
         if !element_states
@@ -4217,7 +4227,7 @@ where
     }
 }
 
-struct OwnedFramebuffer<B: Framebuffer>(Arc<B>);
+struct OwnedFramebuffer<B: Framebuffer>(Rc<B>);
 
 impl<B: Framebuffer> PartialEq for OwnedFramebuffer<B> {
     #[inline]
@@ -4235,7 +4245,7 @@ impl<B: Framebuffer + std::fmt::Debug> std::fmt::Debug for OwnedFramebuffer<B> {
 impl<B: Framebuffer> OwnedFramebuffer<B> {
     #[inline]
     fn new(buffer: B) -> Self {
-        OwnedFramebuffer(Arc::new(buffer))
+        OwnedFramebuffer(Rc::new(buffer))
     }
 }
 

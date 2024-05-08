@@ -214,6 +214,7 @@ impl<D: SeatHandler + 'static> KeyboardTarget<D> for WlSurface {
 }
 
 impl From<KeyState> for WlKeyState {
+    #[inline]
     fn from(state: KeyState) -> WlKeyState {
         match state {
             KeyState::Pressed => WlKeyState::Pressed,

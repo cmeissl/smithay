@@ -25,14 +25,17 @@ pub struct GbmBuffer {
 }
 
 impl PlanarBuffer for GbmBuffer {
+    #[inline]
     fn size(&self) -> (u32, u32) {
         (self.size.w as u32, self.size.h as u32)
     }
 
+    #[inline]
     fn format(&self) -> Fourcc {
         self.format.code
     }
 
+    #[inline]
     fn modifier(&self) -> Option<Modifier> {
         match self.format.modifier {
             Modifier::Invalid => None,
@@ -40,32 +43,39 @@ impl PlanarBuffer for GbmBuffer {
         }
     }
 
+    #[inline]
     fn pitches(&self) -> [u32; 4] {
         self.bo.pitches()
     }
 
+    #[inline]
     fn handles(&self) -> [Option<drm::buffer::Handle>; 4] {
         self.bo.handles()
     }
 
+    #[inline]
     fn offsets(&self) -> [u32; 4] {
         self.bo.offsets()
     }
 }
 
 impl drm::buffer::Buffer for GbmBuffer {
+    #[inline]
     fn size(&self) -> (u32, u32) {
         (self.size.w as u32, self.size.h as u32)
     }
 
+    #[inline]
     fn format(&self) -> Fourcc {
         self.format.code
     }
 
+    #[inline]
     fn pitch(&self) -> u32 {
         self.bo.pitch()
     }
 
+    #[inline]
     fn handle(&self) -> drm::buffer::Handle {
         drm::buffer::Buffer::handle(&self.bo)
     }
@@ -88,12 +98,14 @@ impl GbmBuffer {
 impl std::ops::Deref for GbmBuffer {
     type Target = BufferObject<()>;
 
+    #[inline]
     fn deref(&self) -> &Self::Target {
         &self.bo
     }
 }
 
 impl std::ops::DerefMut for GbmBuffer {
+    #[inline]
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.bo
     }
@@ -107,18 +119,21 @@ pub struct GbmAllocator<A: AsFd + 'static> {
 }
 
 impl<A: AsFd + 'static> AsRef<GbmDevice<A>> for GbmAllocator<A> {
+    #[inline]
     fn as_ref(&self) -> &GbmDevice<A> {
         &self.device
     }
 }
 
 impl<A: AsFd + 'static> AsMut<GbmDevice<A>> for GbmAllocator<A> {
+    #[inline]
     fn as_mut(&mut self) -> &mut GbmDevice<A> {
         &mut self.device
     }
 }
 
 impl<A: AsFd + 'static> AsFd for GbmAllocator<A> {
+    #[inline]
     fn as_fd(&self) -> BorrowedFd<'_> {
         self.device.as_fd()
     }
@@ -200,10 +215,12 @@ impl<A: AsFd + 'static> Allocator for GbmAllocator<A> {
 }
 
 impl Buffer for GbmBuffer {
+    #[inline]
     fn size(&self) -> Size<i32, BufferCoords> {
         self.size
     }
 
+    #[inline]
     fn format(&self) -> Format {
         self.format
     }
@@ -224,6 +241,7 @@ pub enum GbmConvertError {
 }
 
 impl From<gbm::FdError> for GbmConvertError {
+    #[inline]
     fn from(err: gbm::FdError) -> Self {
         match err {
             gbm::FdError::DeviceDestroyed(err) => err.into(),

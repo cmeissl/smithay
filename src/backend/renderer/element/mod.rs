@@ -92,6 +92,7 @@ impl Id {
 
 #[cfg(feature = "wayland_frontend")]
 impl<R: Resource> From<&R> for Id {
+    #[inline]
     fn from(resource: &R) -> Self {
         Id::from_wayland_resource(resource)
     }
@@ -1008,6 +1009,7 @@ macro_rules! render_elements_internal {
                     $($renderer: std::convert::AsMut<$other_renderer>,)?
                 )*
             {
+                #[inline]
                 fn from(field: $field) -> $name<$renderer> {
                     $name::$body(field)
                 }
@@ -1027,6 +1029,7 @@ macro_rules! render_elements_internal {
                     $($renderer: std::convert::AsMut<$other_renderer>,)?
                 )*
             {
+                #[inline]
                 fn from(field: $field) -> $name<$renderer, $custom> {
                     $name::$body(field)
                 }
@@ -1045,6 +1048,7 @@ macro_rules! render_elements_internal {
                     $($renderer: std::convert::AsMut<$other_renderer>,)?
                 )*
             {
+                #[inline]
                 fn from(field: $field) -> $name<$lt, $renderer> {
                     $name::$body(field)
                 }
@@ -1064,6 +1068,7 @@ macro_rules! render_elements_internal {
                     $($renderer: std::convert::AsMut<$other_renderer>,)?
                 )*
             {
+                #[inline]
                 fn from(field: $field) -> $name<$lt, $renderer, $custom> {
                     $name::$body(field)
                 }
@@ -1076,6 +1081,7 @@ macro_rules! render_elements_internal {
                 #[$meta]
             )*
             impl From<$field> for $name {
+                #[inline]
                 fn from(field: $field) -> $name {
                     $name::$body(field)
                 }
@@ -1088,6 +1094,7 @@ macro_rules! render_elements_internal {
                 #[$meta]
             )*
             impl<$lt> From<$field> for $name<$lt> {
+                #[inline]
                 fn from(field: $field) -> $name<$lt> {
                     $name::$body(field)
                 }

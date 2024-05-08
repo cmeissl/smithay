@@ -64,6 +64,7 @@ pub enum TextureFilter {
 
 impl Transform {
     /// A projection matrix to apply this transformation
+    #[inline]
     pub fn matrix(&self) -> Matrix3<f32> {
         match self {
             Transform::Normal => Matrix3::new(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0),
@@ -80,6 +81,7 @@ impl Transform {
 
 #[cfg(feature = "wayland_frontend")]
 impl From<wayland_server::protocol::wl_output::Transform> for Transform {
+    #[inline]
     fn from(transform: wayland_server::protocol::wl_output::Transform) -> Transform {
         use wayland_server::protocol::wl_output::Transform as WlTransform;
         match transform {

@@ -101,6 +101,7 @@ pub trait WaylandFocus {
 }
 
 impl WaylandFocus for wl_surface::WlSurface {
+    #[inline]
     fn wl_surface(&self) -> Option<Cow<'_, wl_surface::WlSurface>> {
         Some(Cow::Borrowed(self))
     }

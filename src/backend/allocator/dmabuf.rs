@@ -64,6 +64,7 @@ pub(crate) struct Plane {
 }
 
 impl From<Plane> for OwnedFd {
+    #[inline]
     fn from(plane: Plane) -> OwnedFd {
         plane.fd
     }
@@ -98,12 +99,14 @@ struct PlaneRef {
 }
 
 impl AsFd for PlaneRef {
+    #[inline]
     fn as_fd(&self) -> BorrowedFd<'_> {
         self.dmabuf.0.planes[self.idx].fd.as_fd()
     }
 }
 
 impl PartialEq for Dmabuf {
+    #[inline]
     fn eq(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.0, &other.0)
     }
@@ -111,6 +114,7 @@ impl PartialEq for Dmabuf {
 impl Eq for Dmabuf {}
 
 impl PartialEq for WeakDmabuf {
+    #[inline]
     fn eq(&self, other: &Self) -> bool {
         Weak::ptr_eq(&self.0, &other.0)
     }
@@ -118,21 +122,25 @@ impl PartialEq for WeakDmabuf {
 impl Eq for WeakDmabuf {}
 
 impl Hash for Dmabuf {
+    #[inline]
     fn hash<H: Hasher>(&self, state: &mut H) {
         Arc::as_ptr(&self.0).hash(state)
     }
 }
 impl Hash for WeakDmabuf {
+    #[inline]
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.0.as_ptr().hash(state)
     }
 }
 
 impl Buffer for Dmabuf {
+    #[inline]
     fn size(&self) -> Size<i32, BufferCoords> {
         self.0.size
     }
 
+    #[inline]
     fn format(&self) -> Format {
         Format {
             code: self.0.format,
@@ -345,6 +353,7 @@ bitflags::bitflags! {
 }
 
 impl From<DmabufMappingMode> for rustix::mm::ProtFlags {
+    #[inline]
     fn from(mode: DmabufMappingMode) -> Self {
         let mut flags = rustix::mm::ProtFlags::empty();
 
@@ -440,6 +449,7 @@ impl WeakDmabuf {
     }
 
     /// Returns true if there are not any strong references remaining
+    #[inline]
     pub fn is_gone(&self) -> bool {
         self.0.strong_count() == 0
     }

@@ -557,6 +557,7 @@ where
 }
 
 impl From<Axis> for WlAxis {
+    #[inline]
     fn from(axis: Axis) -> WlAxis {
         match axis {
             Axis::Horizontal => WlAxis::HorizontalScroll,
@@ -581,6 +582,7 @@ impl TryFrom<WlAxis> for Axis {
 }
 
 impl From<AxisSource> for WlAxisSource {
+    #[inline]
     fn from(axis: AxisSource) -> WlAxisSource {
         match axis {
             AxisSource::Wheel => WlAxisSource::Wheel,
@@ -592,6 +594,7 @@ impl From<AxisSource> for WlAxisSource {
 }
 
 impl From<ButtonState> for WlButtonState {
+    #[inline]
     fn from(state: ButtonState) -> WlButtonState {
         match state {
             ButtonState::Pressed => WlButtonState::Pressed,

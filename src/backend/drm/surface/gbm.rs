@@ -543,6 +543,7 @@ pub enum Error<E: std::error::Error + Send + Sync + 'static> {
 }
 
 impl<E: std::error::Error + Send + Sync + 'static> From<Error<E>> for SwapBuffersError {
+    #[inline]
     fn from(err: Error<E>) -> SwapBuffersError {
         match err {
             x @ Error::NoSupportedPlaneFormat

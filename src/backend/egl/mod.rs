@@ -143,6 +143,7 @@ pub enum SwapBuffersError {
 }
 
 impl std::convert::From<SwapBuffersError> for GraphicsSwapBuffersError {
+    #[inline]
     fn from(value: SwapBuffersError) -> Self {
         match value {
             // bad surface is answered with a surface recreation in `swap_buffers`
@@ -162,6 +163,7 @@ impl std::convert::From<SwapBuffersError> for GraphicsSwapBuffersError {
 pub struct MakeCurrentError(#[from] EGLError);
 
 impl From<MakeCurrentError> for GraphicsSwapBuffersError {
+    #[inline]
     fn from(err: MakeCurrentError) -> GraphicsSwapBuffersError {
         match err {
             /*
@@ -216,6 +218,7 @@ pub enum Format {
 
 impl Format {
     /// Amount of planes this format uses
+    #[inline]
     pub fn num_planes(&self) -> usize {
         match *self {
             Format::RGB | Format::RGBA | Format::External => 1,
@@ -242,6 +245,7 @@ pub struct EGLBuffer {
 #[cfg(feature = "wayland_frontend")]
 impl EGLBuffer {
     /// Amount of planes of this EGLBuffer
+    #[inline]
     pub fn num_planes(&self) -> usize {
         self.format.num_planes()
     }

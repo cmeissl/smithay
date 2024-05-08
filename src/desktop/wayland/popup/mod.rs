@@ -24,6 +24,7 @@ pub enum PopupKind {
 }
 
 impl IsAlive for PopupKind {
+    #[inline]
     fn alive(&self) -> bool {
         match self {
             PopupKind::Xdg(ref p) => p.alive(),
@@ -33,6 +34,7 @@ impl IsAlive for PopupKind {
 }
 
 impl From<PopupKind> for WlSurface {
+    #[inline]
     fn from(p: PopupKind) -> Self {
         p.wl_surface().clone()
     }
@@ -40,6 +42,7 @@ impl From<PopupKind> for WlSurface {
 
 impl PopupKind {
     /// Retrieves the underlying [`WlSurface`]
+    #[inline]
     pub fn wl_surface(&self) -> &WlSurface {
         match *self {
             PopupKind::Xdg(ref t) => t.wl_surface(),
@@ -99,12 +102,14 @@ impl PopupKind {
 }
 
 impl From<xdg::PopupSurface> for PopupKind {
+    #[inline]
     fn from(p: xdg::PopupSurface) -> PopupKind {
         PopupKind::Xdg(p)
     }
 }
 
 impl From<input_method::PopupSurface> for PopupKind {
+    #[inline]
     fn from(p: input_method::PopupSurface) -> PopupKind {
         PopupKind::InputMethod(p)
     }

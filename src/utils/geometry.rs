@@ -279,12 +279,14 @@ impl<N: Coordinate> Scale<N> {
 }
 
 impl<N: Coordinate> From<N> for Scale<N> {
+    #[inline]
     fn from(scale: N) -> Self {
         Scale { x: scale, y: scale }
     }
 }
 
 impl<N: Coordinate> From<(N, N)> for Scale<N> {
+    #[inline]
     fn from((scale_x, scale_y): (N, N)) -> Self {
         Scale {
             x: scale_x,
@@ -300,6 +302,7 @@ where
 {
     type Output = Scale<N>;
 
+    #[inline]
     fn mul(self, rhs: T) -> Self::Output {
         let rhs = rhs.into();
         Scale {
@@ -613,6 +616,7 @@ impl<N: Clone, Kind> Clone for Point<N, Kind> {
 impl<N: Copy, Kind> Copy for Point<N, Kind> {}
 
 impl<N: PartialEq, Kind> PartialEq for Point<N, Kind> {
+    #[inline]
     fn eq(&self, other: &Self) -> bool {
         self.x == other.x && self.y == other.y
     }
@@ -621,6 +625,7 @@ impl<N: PartialEq, Kind> PartialEq for Point<N, Kind> {
 impl<N: Eq, Kind> Eq for Point<N, Kind> {}
 
 impl<N: Default, Kind> Default for Point<N, Kind> {
+    #[inline]
     fn default() -> Self {
         Point {
             x: N::default(),
@@ -926,6 +931,7 @@ impl<N: Clone, Kind> Clone for Size<N, Kind> {
 impl<N: Copy, Kind> Copy for Size<N, Kind> {}
 
 impl<N: PartialEq, Kind> PartialEq for Size<N, Kind> {
+    #[inline]
     fn eq(&self, other: &Self) -> bool {
         self.w == other.w && self.h == other.h
     }
@@ -934,6 +940,7 @@ impl<N: PartialEq, Kind> PartialEq for Size<N, Kind> {
 impl<N: Eq, Kind> Eq for Size<N, Kind> {}
 
 impl<N: Default, Kind> Default for Size<N, Kind> {
+    #[inline]
     fn default() -> Self {
         Size {
             w: N::default(),
@@ -1399,6 +1406,7 @@ impl<N: Clone, Kind> Clone for Rectangle<N, Kind> {
 impl<N: Copy, Kind> Copy for Rectangle<N, Kind> {}
 
 impl<N: PartialEq, Kind> PartialEq for Rectangle<N, Kind> {
+    #[inline]
     fn eq(&self, other: &Self) -> bool {
         self.loc == other.loc && self.size == other.size
     }
@@ -1407,6 +1415,7 @@ impl<N: PartialEq, Kind> PartialEq for Rectangle<N, Kind> {
 impl<N: Eq, Kind> Eq for Rectangle<N, Kind> {}
 
 impl<N: Default, Kind> Default for Rectangle<N, Kind> {
+    #[inline]
     fn default() -> Self {
         Rectangle {
             loc: Default::default(),
@@ -1442,6 +1451,7 @@ impl Transform {
     /// Inverts any 90-degree transformation into 270-degree transformations and vise versa.
     ///
     /// Flipping is preserved and 180/Normal transformation are uneffected.
+    #[inline]
     pub fn invert(&self) -> Transform {
         match self {
             Transform::Normal => Transform::Normal,
@@ -1557,6 +1567,7 @@ impl std::ops::Add for Transform {
 
 #[cfg(feature = "wayland_frontend")]
 impl From<Transform> for WlTransform {
+    #[inline]
     fn from(transform: Transform) -> Self {
         match transform {
             Transform::Normal => WlTransform::Normal,

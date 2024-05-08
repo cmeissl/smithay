@@ -116,6 +116,7 @@ pub struct LockSurface {
 }
 
 impl PartialEq for LockSurface {
+    #[inline]
     fn eq(&self, other: &Self) -> bool {
         self.surface == other.surface
     }
@@ -130,6 +131,7 @@ impl LockSurface {
     }
 
     /// Check if the surface is still alive.
+    #[inline]
     pub fn alive(&self) -> bool {
         self.surface.alive()
     }
@@ -182,6 +184,7 @@ impl LockSurface {
     }
 
     /// Access the underlying [`WlSurface`].
+    #[inline]
     pub fn wl_surface(&self) -> &WlSurface {
         &self.surface
     }

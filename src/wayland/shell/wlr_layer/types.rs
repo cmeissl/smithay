@@ -203,6 +203,7 @@ impl Default for ExclusiveZone {
 }
 
 impl From<i32> for ExclusiveZone {
+    #[inline]
     fn from(v: i32) -> Self {
         match v.cmp(&0) {
             Ordering::Greater => Self::Exclusive(v as u32),
@@ -213,6 +214,7 @@ impl From<i32> for ExclusiveZone {
 }
 
 impl From<ExclusiveZone> for i32 {
+    #[inline]
     fn from(z: ExclusiveZone) -> i32 {
         match z {
             ExclusiveZone::Exclusive(v) => v as i32,

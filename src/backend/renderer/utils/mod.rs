@@ -45,6 +45,7 @@ impl CommitCounter {
 }
 
 impl From<usize> for CommitCounter {
+    #[inline]
     fn from(counter: usize) -> Self {
         CommitCounter(counter)
     }
@@ -76,6 +77,7 @@ pub struct DamageSnapshot<N, Kind> {
 }
 
 impl<N, Kind> Clone for DamageSnapshot<N, Kind> {
+    #[inline]
     fn clone(&self) -> Self {
         Self {
             limit: self.limit,
@@ -144,6 +146,7 @@ const MAX_DAMAGE_RECTS: usize = 16;
 const MAX_DAMAGE_SET: usize = MAX_DAMAGE_RECTS * 2;
 
 impl<N: Clone, Kind> Default for DamageBag<N, Kind> {
+    #[inline]
     fn default() -> Self {
         DamageBag::new(MAX_DAMAGE_AGE)
     }
@@ -173,6 +176,7 @@ impl<N: Clone, Kind> DamageSnapshot<N, Kind> {
     /// calling [`damage_since`](DamageSnapshot::damage_since)
     /// and provided to the next call of [`damage_since`](DamageSnapshot::damage_since)
     /// to query the damage between these two [`CommitCounter`]s.
+    #[inline]
     pub fn current_commit(&self) -> CommitCounter {
         self.commit_counter
     }
@@ -243,6 +247,7 @@ impl<N: Clone, Kind> DamageBag<N, Kind> {
     }
 
     /// Gets the current [`CommitCounter`] of this tracker
+    #[inline]
     pub fn current_commit(&self) -> CommitCounter {
         self.state.current_commit()
     }
@@ -302,6 +307,7 @@ impl<N, Kind> Default for DamageSet<N, Kind> {
 
 impl<N: Copy, Kind> DamageSet<N, Kind> {
     /// Copy the damage from a slice into a new `DamageSet`.
+    #[inline]
     pub fn from_slice(slice: &[Rectangle<N, Kind>]) -> Self {
         Self {
             damage: smallvec::SmallVec::from_slice(slice),
@@ -312,6 +318,7 @@ impl<N: Copy, Kind> DamageSet<N, Kind> {
 impl<N, Kind> std::ops::Deref for DamageSet<N, Kind> {
     type Target = [Rectangle<N, Kind>];
 
+    #[inline]
     fn deref(&self) -> &Self::Target {
         &self.damage
     }
@@ -322,6 +329,7 @@ impl<N, Kind> IntoIterator for DamageSet<N, Kind> {
 
     type IntoIter = DamageSetIter<N, Kind>;
 
+    #[inline]
     fn into_iter(self) -> Self::IntoIter {
         DamageSetIter {
             inner: self.damage.into_iter(),
@@ -330,6 +338,7 @@ impl<N, Kind> IntoIterator for DamageSet<N, Kind> {
 }
 
 impl<N, Kind> FromIterator<Rectangle<N, Kind>> for DamageSet<N, Kind> {
+    #[inline]
     fn from_iter<T: IntoIterator<Item = Rectangle<N, Kind>>>(iter: T) -> Self {
         Self {
             damage: smallvec::SmallVec::from_iter(iter),
@@ -369,10 +378,12 @@ impl<N: fmt::Debug> fmt::Debug for DamageSetIter<N, Logical> {
 impl<N, Kind> Iterator for DamageSetIter<N, Kind> {
     type Item = Rectangle<N, Kind>;
 
+    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         self.inner.next()
     }
 
+    #[inline]
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.inner.size_hint()
     }
@@ -407,6 +418,7 @@ impl<N, Kind> Default for OpaqueRegions<N, Kind>
 where
     N: Default,
 {
+    #[inline]
     fn default() -> Self {
         Self {
             regions: Default::default(),
@@ -416,6 +428,7 @@ where
 
 impl<N: Copy, Kind> OpaqueRegions<N, Kind> {
     /// Copy the opaque regions from a slice into a new `OpaqueRegions`.
+    #[inline]
     pub fn from_slice(slice: &[Rectangle<N, Kind>]) -> Self {
         Self {
             regions: smallvec::SmallVec::from_slice(slice),
@@ -426,6 +439,7 @@ impl<N: Copy, Kind> OpaqueRegions<N, Kind> {
 impl<N, Kind> std::ops::Deref for OpaqueRegions<N, Kind> {
     type Target = [Rectangle<N, Kind>];
 
+    #[inline]
     fn deref(&self) -> &Self::Target {
         &self.regions
     }
@@ -436,6 +450,7 @@ impl<N, Kind> IntoIterator for OpaqueRegions<N, Kind> {
 
     type IntoIter = OpaqueRegionsIter<N, Kind>;
 
+    #[inline]
     fn into_iter(self) -> Self::IntoIter {
         OpaqueRegionsIter {
             inner: self.regions.into_iter(),
@@ -444,6 +459,7 @@ impl<N, Kind> IntoIterator for OpaqueRegions<N, Kind> {
 }
 
 impl<N, Kind> FromIterator<Rectangle<N, Kind>> for OpaqueRegions<N, Kind> {
+    #[inline]
     fn from_iter<T: IntoIterator<Item = Rectangle<N, Kind>>>(iter: T) -> Self {
         Self {
             regions: smallvec::SmallVec::from_iter(iter),
@@ -483,10 +499,12 @@ impl<N: fmt::Debug> fmt::Debug for OpaqueRegionsIter<N, Logical> {
 impl<N, Kind> Iterator for OpaqueRegionsIter<N, Kind> {
     type Item = Rectangle<N, Kind>;
 
+    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         self.inner.next()
     }
 
+    #[inline]
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.inner.size_hint()
     }

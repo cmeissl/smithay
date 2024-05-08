@@ -57,6 +57,7 @@ impl Drop for WindowInner {
 pub struct Window(pub(crate) Arc<WindowInner>);
 
 impl PartialEq for Window {
+    #[inline]
     fn eq(&self, other: &Self) -> bool {
         self.0.id == other.0.id
     }
@@ -65,12 +66,14 @@ impl PartialEq for Window {
 impl Eq for Window {}
 
 impl Hash for Window {
+    #[inline]
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.0.id.hash(state);
     }
 }
 
 impl IsAlive for Window {
+    #[inline]
     fn alive(&self) -> bool {
         match &self.0.surface {
             WindowSurface::Wayland(s) => s.alive(),
@@ -135,12 +138,14 @@ impl Window {
     }
 
     /// Checks if the window is a wayland one.
+    #[inline]
     pub fn is_wayland(&self) -> bool {
         matches!(self.0.surface, WindowSurface::Wayland(_))
     }
 
     /// Checks if the window is an X11 one.
     #[cfg(feature = "xwayland")]
+    #[inline]
     pub fn is_x11(&self) -> bool {
         matches!(self.0.surface, WindowSurface::X11(_))
     }
@@ -383,12 +388,14 @@ impl Window {
     }
 
     /// Returns a [`UserDataMap`] to allow associating arbitrary data with this window.
+    #[inline]
     pub fn user_data(&self) -> &UserDataMap {
         &self.0.user_data
     }
 }
 
 impl WaylandFocus for Window {
+    #[inline]
     fn wl_surface(&self) -> Option<Cow<'_, wl_surface::WlSurface>> {
         match &self.0.surface {
             WindowSurface::Wayland(s) => Some(Cow::Borrowed(s.wl_surface())),
