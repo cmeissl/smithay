@@ -1402,8 +1402,7 @@ impl From<ExportBufferError> for Option<RenderingReason> {
 
 #[derive(Debug)]
 struct OverlayPlaneElementIds {
-    plane_plane_ids: IndexMap<plane::Handle, Id>,
-    plane_id_element_ids: IndexMap<Id, Id>,
+    plane_ids: Vec<(plane::Handle, Id, Id)>,
 }
 
 impl OverlayPlaneElementIds {
@@ -1411,42 +1410,38 @@ impl OverlayPlaneElementIds {
         let overlay_plane_count = planes.overlay.len();
 
         Self {
-            plane_plane_ids: IndexMap::with_capacity(overlay_plane_count),
-            plane_id_element_ids: IndexMap::with_capacity(overlay_plane_count),
+            plane_ids: Vec::with_capacity(overlay_plane_count),
         }
     }
 
+    #[profiling::function]
     fn plane_id_for_element_id(&mut self, plane: &plane::Handle, element_id: &Id) -> Id {
         // Either get the existing plane id for the plane when the stored element id
         // matches or generate a new Id (and update the element id)
-        self.plane_plane_ids
-            .entry(*plane)
-            .and_modify(|plane_id| {
-                let current_element_id = self.plane_id_element_ids.get(plane_id).unwrap();
+        let existing = self.plane_ids.iter_mut().find(|(p, _, _)| p == plane);
+        if let Some((_, plane_id, current_element_id)) = existing {
+            if current_element_id != element_id {
+                *plane_id = Id::new();
+                *current_element_id = element_id.clone();
+            }
 
-                if current_element_id != element_id {
-                    *plane_id = Id::new();
-                    self.plane_id_element_ids
-                        .insert(plane_id.clone(), element_id.clone());
-                }
-            })
-            .or_insert_with(|| {
-                let plane_id = Id::new();
-                self.plane_id_element_ids
-                    .insert(plane_id.clone(), element_id.clone());
-                plane_id
-            })
-            .clone()
+            plane_id.clone()
+        } else {
+            let plane_id = Id::new();
+
+            self.plane_ids
+                .push((*plane, plane_id.clone(), element_id.clone()));
+
+            plane_id
+        }
     }
 
     fn contains_plane_id(&self, plane_id: &Id) -> bool {
-        self.plane_id_element_ids.contains_key(plane_id)
+        self.plane_ids.iter().any(|(_, p, _)| p == plane_id)
     }
 
     fn remove_plane(&mut self, plane: &plane::Handle) {
-        if let Some(plane_id) = self.plane_plane_ids.swap_remove(plane) {
-            self.plane_id_element_ids.swap_remove(&plane_id);
-        }
+        self.plane_ids.retain(|(p, _, _)| p != plane);
     }
 }
 
@@ -2090,56 +2085,67 @@ where
         let mut output_elements: Vec<(&'a E, Rectangle<i32, Physical>, usize, bool)> =
             Vec::with_capacity(elements.len());
 
-        for element in elements.iter() {
-            let element_id = element.id();
-            let element_geometry = element.geometry(output_scale);
-            let element_loc = element_geometry.loc;
+        {
+            profiling::scope!("init_output_elements");
+            let mut element_opaque_regions_workhouse = Vec::with_capacity(10);
+            for element in elements.iter() {
+                let element_id = element.id();
+                let element_geometry = element.geometry(output_scale);
+                let element_loc = element_geometry.loc;
 
-            // First test if the element overlaps with the output
-            // if not we can skip it
-            let element_output_geometry = match element_geometry.intersection(output_geometry) {
-                Some(geo) => geo,
-                None => continue,
-            };
+                // First test if the element overlaps with the output
+                // if not we can skip it
+                let element_output_geometry = match element_geometry.intersection(output_geometry) {
+                    Some(geo) => geo,
+                    None => continue,
+                };
 
-            // Then test if the element is completely hidden behind opaque regions
-            // FIXME: This should be possible to calculate without allocating
-            let element_visible_area = element_output_geometry
-                .subtract_rects(opaque_regions.iter().copied())
-                .into_iter()
-                .fold(0usize, |acc, item| acc + (item.size.w * item.size.h) as usize);
+                // Then test if the element is completely hidden behind opaque regions
+                element_opaque_regions_workhouse.clear();
+                element_opaque_regions_workhouse.push(element_output_geometry);
+                element_opaque_regions_workhouse = Rectangle::subtract_rects_many_in_place(
+                    element_opaque_regions_workhouse,
+                    opaque_regions.iter().copied(),
+                );
+                let element_visible_area = element_opaque_regions_workhouse
+                    .iter()
+                    .fold(0usize, |acc, item| acc + (item.size.w * item.size.h) as usize);
 
-            if element_visible_area == 0 {
-                // No need to draw a completely hidden element
-                trace!("skipping completely obscured element {:?}", element.id());
+                if element_visible_area == 0 {
+                    // No need to draw a completely hidden element
+                    trace!("skipping completely obscured element {:?}", element.id());
 
-                // We allow multiple instance of a single element, so do not
-                // override the state if we already have one
-                if !render_element_states.states.contains_key(element_id) {
-                    render_element_states
-                        .states
-                        .insert(element_id.clone(), RenderElementState::skipped());
+                    // We allow multiple instance of a single element, so do not
+                    // override the state if we already have one
+                    if !render_element_states.states.contains_key(element_id) {
+                        render_element_states
+                            .states
+                            .insert(element_id.clone(), RenderElementState::skipped());
+                    }
+                    continue;
                 }
-                continue;
+
+                let element_opaque_regions = element.opaque_regions(output_scale);
+                element_opaque_regions_workhouse.clear();
+                element_opaque_regions_workhouse.push(element_output_geometry);
+                element_opaque_regions_workhouse = Rectangle::subtract_rects_many_in_place(
+                    element_opaque_regions_workhouse,
+                    element_opaque_regions.iter().copied(),
+                );
+                let element_is_opaque = element_opaque_regions_workhouse.is_empty();
+
+                opaque_regions.extend(
+                    element_opaque_regions
+                        .into_iter()
+                        .map(|mut region| {
+                            region.loc += element_loc;
+                            region
+                        })
+                        .filter_map(|geo| geo.intersection(output_geometry)),
+                );
+
+                output_elements.push((element, element_geometry, element_visible_area, element_is_opaque));
             }
-
-            let element_opaque_regions = element.opaque_regions(output_scale);
-            // FIXME: This should be possible to calculate without allocating
-            let element_is_opaque = Rectangle::from_loc_and_size(Point::default(), element_geometry.size)
-                .subtract_rects(element_opaque_regions.iter().copied())
-                .is_empty();
-
-            opaque_regions.extend(
-                element_opaque_regions
-                    .into_iter()
-                    .map(|mut region| {
-                        region.loc += element_loc;
-                        region
-                    })
-                    .filter_map(|geo| geo.intersection(output_geometry)),
-            );
-
-            output_elements.push((element, element_geometry, element_visible_area, element_is_opaque));
         }
 
         // This will hold the element that has been selected for direct scan-out on
@@ -2349,6 +2355,7 @@ where
             .unwrap_or(false);
 
         if render {
+            profiling::scope!("rendering");
             trace!(
                 "rendering {} elements on the primary {:?}",
                 primary_plane_elements.len(),
@@ -2385,15 +2392,25 @@ where
             // commit -> unlikely but possible
             // So we use an Id per plane for as long as we have the same element
             // on that plane.
-            let overlay_plane_lookup: HashMap<plane::Handle, &PlaneInfo> =
-                self.planes.overlay.iter().map(|p| (p.handle, p)).collect();
             let overlay_plane_elements = overlay_plane_elements.iter().filter_map(|(p, element)| {
+                profiling::scope!("overlay_plane_element");
                 let id = self
                     .overlay_plane_element_ids
                     .plane_id_for_element_id(p, element.id());
 
-                let is_underlay = overlay_plane_lookup.get(p).unwrap().zpos.unwrap_or_default()
-                    < self.planes.primary.zpos.unwrap_or_default();
+                let plane_z_pos = self
+                    .planes
+                    .overlay
+                    .iter()
+                    .find_map(|info| {
+                        if info.handle == *p {
+                            Some(info.zpos.unwrap_or_default())
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or_default();
+                let is_underlay = plane_z_pos < self.planes.primary.zpos.unwrap_or_default();
                 if is_underlay {
                     Some(HolepunchRenderElement::from_render_element(id, element, output_scale).into())
                 } else {

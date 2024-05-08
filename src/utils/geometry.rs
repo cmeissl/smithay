@@ -1120,6 +1120,7 @@ impl<N: Coordinate, Kind> Rectangle<N, Kind> {
     ///
     /// Returns `None` if the two rectangles don't overlap
     #[inline]
+    #[profiling::function]
     pub fn intersection(self, other: impl Into<Rectangle<N, Kind>>) -> Option<Self> {
         let other = other.into();
         if !self.overlaps(other) {
@@ -1167,6 +1168,7 @@ impl<N: Coordinate, Kind> Rectangle<N, Kind> {
     }
 
     /// Subtract a set of [`Rectangle`]s from this [`Rectangle`]
+    #[profiling::function]
     pub fn subtract_rects(self, others: impl IntoIterator<Item = Self>) -> Vec<Self> {
         let mut remaining = Vec::with_capacity(4);
         remaining.push(self);
@@ -1174,6 +1176,7 @@ impl<N: Coordinate, Kind> Rectangle<N, Kind> {
     }
 
     /// Subtract a set of [`Rectangle`]s from a set [`Rectangle`]s
+    #[profiling::function]
     pub fn subtract_rects_many(
         rects: impl IntoIterator<Item = Self>,
         others: impl IntoIterator<Item = Self>,
@@ -1183,6 +1186,7 @@ impl<N: Coordinate, Kind> Rectangle<N, Kind> {
     }
 
     /// Subtract a set of [`Rectangle`]s from a set [`Rectangle`]s in-place
+    #[profiling::function]
     pub fn subtract_rects_many_in_place(
         mut rects: Vec<Self>,
         others: impl IntoIterator<Item = Self>,

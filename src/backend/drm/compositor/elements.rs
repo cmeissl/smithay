@@ -23,6 +23,7 @@ pub struct HolepunchRenderElement {
 }
 
 impl HolepunchRenderElement {
+    #[profiling::function]
     pub fn from_render_element<R, E>(id: Id, element: &E, scale: impl Into<Scale<f64>>) -> Self
     where
         R: Renderer,
@@ -93,6 +94,7 @@ pub struct OverlayPlaneElement {
 }
 
 impl OverlayPlaneElement {
+    #[profiling::function]
     pub fn from_render_element<R, E>(id: Id, element: &E, scale: impl Into<Scale<f64>>) -> Option<Self>
     where
         R: Renderer,

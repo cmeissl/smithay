@@ -426,6 +426,7 @@ impl<R: Renderer + ImportAll> Element for WaylandSurfaceRenderElement<R> {
         self.damage.current_commit()
     }
 
+    #[profiling::function]
     fn geometry(&self, scale: Scale<f64>) -> Rectangle<i32, Physical> {
         Rectangle::from_loc_and_size(self.location.to_i32_round(), self.size(scale))
     }
@@ -479,6 +480,7 @@ impl<R: Renderer + ImportAll> Element for WaylandSurfaceRenderElement<R> {
             .collect::<DamageSet<_, _>>()
     }
 
+    #[profiling::function]
     fn opaque_regions(&self, scale: Scale<f64>) -> OpaqueRegions<i32, Physical> {
         if self.alpha < 1.0 {
             return OpaqueRegions::default();

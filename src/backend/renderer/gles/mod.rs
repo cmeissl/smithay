@@ -2372,10 +2372,12 @@ impl Renderer for GlesRenderer {
         })
     }
 
+    #[profiling::function]
     fn set_debug_flags(&mut self, flags: DebugFlags) {
         self.debug_flags = flags;
     }
 
+    #[profiling::function]
     fn debug_flags(&self) -> DebugFlags {
         self.debug_flags
     }
