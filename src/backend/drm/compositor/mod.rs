@@ -207,7 +207,7 @@ impl<B: Buffer> ScanoutBuffer<B> {
     #[inline]
     fn from_underlying_storage(storage: UnderlyingStorage<'_>) -> Option<Self> {
         match storage {
-            UnderlyingStorage::Wayland(buffer) => Some(Self::Wayland(buffer.into_owned())),
+            UnderlyingStorage::Wayland(buffer) => Some(Self::Wayland(buffer.clone())),
             UnderlyingStorage::Memory { .. } => None,
         }
     }

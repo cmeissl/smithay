@@ -103,9 +103,9 @@ impl<R: Resource> From<&R> for Id {
 pub enum UnderlyingStorage<'a> {
     /// A wayland buffer
     #[cfg(feature = "wayland_frontend")]
-    Wayland(Cow<'a, Buffer>),
+    Wayland(&'a Buffer),
     /// A memory backed buffer
-    Memory(Cow<'a, memory::MemoryBuffer>),
+    Memory(&'a memory::MemoryBuffer),
 }
 
 /// Defines the (optional) reason why a [`Element`] was selected for

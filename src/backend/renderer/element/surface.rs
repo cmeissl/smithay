@@ -514,7 +514,7 @@ where
 {
     #[inline]
     fn underlying_storage(&self, _renderer: &mut R) -> Option<UnderlyingStorage<'_>> {
-        Some(UnderlyingStorage::Wayland(Cow::Borrowed(&self.buffer)))
+        Some(UnderlyingStorage::Wayland(&self.buffer))
     }
 
     #[instrument(level = "trace", skip(frame))]

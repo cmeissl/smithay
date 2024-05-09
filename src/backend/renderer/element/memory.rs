@@ -758,6 +758,6 @@ where
 
     #[inline]
     fn underlying_storage(&self, _renderer: &mut R) -> Option<UnderlyingStorage<'_>> {
-        Some(UnderlyingStorage::Memory(Cow::Borrowed(&self.buffer)))
+        Some(UnderlyingStorage::Memory(&self.buffer))
     }
 }
