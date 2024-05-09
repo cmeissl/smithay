@@ -399,18 +399,6 @@ where
     }
 }
 
-impl<B> Clone for ElementFramebufferCache<B>
-where
-    B: Framebuffer,
-{
-    #[inline]
-    fn clone(&self) -> Self {
-        Self {
-            fb_cache: self.fb_cache.clone(),
-        }
-    }
-}
-
 impl<B> Default for ElementFramebufferCache<B>
 where
     B: Framebuffer,

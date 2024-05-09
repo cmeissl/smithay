@@ -467,6 +467,7 @@ pub trait AsDmabuf {
 impl AsDmabuf for Dmabuf {
     type Error = std::convert::Infallible;
 
+    #[inline]
     fn export(&self) -> Result<Dmabuf, std::convert::Infallible> {
         Ok(self.clone())
     }
