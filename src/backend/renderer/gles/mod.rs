@@ -772,8 +772,6 @@ impl GlesRenderer {
         } else {
             unsafe { self.egl.make_current()? };
         }
-        // delayed destruction until the next frame rendering.
-        self.cleanup();
         Ok(())
     }
 
@@ -1284,14 +1282,14 @@ impl GlesRenderer {
             return Ok(None);
         };
 
-            trace!("Re-using texture {:?} for {:?}", texture.0.texture, buffer);
-            if let Some(egl_images) = texture.0.egl_images.as_ref() {
-                if egl_images[0] == ffi_egl::NO_IMAGE_KHR {
-                    return Ok(None);
-                }
-                let tex = Some(texture.0.texture);
-                self.import_egl_image(egl_images[0], texture.0.is_external, tex)?;
+        trace!("Re-using texture {:?} for {:?}", texture.0.texture, buffer);
+        if let Some(egl_images) = texture.0.egl_images.as_ref() {
+            if egl_images[0] == ffi_egl::NO_IMAGE_KHR {
+                return Ok(None);
             }
+            let tex = Some(texture.0.texture);
+            self.import_egl_image(egl_images[0], texture.0.is_external, tex)?;
+        }
         Ok(Some(texture.clone()))
     }
 
@@ -2625,6 +2623,9 @@ impl<'frame> GlesFrame<'frame> {
                 }
             }
         }
+
+        // delayed destruction until the next frame rendering.
+        self.renderer.cleanup();
 
         // if we support egl fences we should use it
         if self.renderer.capabilities.contains(&Capability::Fencing) {
