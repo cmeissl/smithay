@@ -1280,13 +1280,10 @@ impl ImportDmaWl for GlesRenderer {}
 impl GlesRenderer {
     #[profiling::function]
     fn existing_dmabuf_texture(&self, buffer: &Dmabuf) -> Result<Option<GlesTexture>, GlesError> {
-        let existing_texture = self
-            .dmabuf_cache
-            .iter()
-            .find(|(weak, _)| weak.upgrade().map(|entry| &entry == buffer).unwrap_or(false))
-            .map(|(_, tex)| tex.clone());
+        let Some(texture) = self.dmabuf_cache.get(&buffer.weak()) else {
+            return Ok(None);
+        };
 
-        if let Some(texture) = existing_texture {
             trace!("Re-using texture {:?} for {:?}", texture.0.texture, buffer);
             if let Some(egl_images) = texture.0.egl_images.as_ref() {
                 if egl_images[0] == ffi_egl::NO_IMAGE_KHR {
@@ -1295,10 +1292,7 @@ impl GlesRenderer {
                 let tex = Some(texture.0.texture);
                 self.import_egl_image(egl_images[0], texture.0.is_external, tex)?;
             }
-            Ok(Some(texture))
-        } else {
-            Ok(None)
-        }
+        Ok(Some(texture.clone()))
     }
 
     #[profiling::function]
