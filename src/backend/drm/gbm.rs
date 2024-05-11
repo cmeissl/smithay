@@ -89,32 +89,33 @@ pub fn framebuffer_from_wayland_buffer<A: AsFd + 'static>(
         }
     }
 
-    #[cfg(all(feature = "backend_egl", feature = "use_system_lib"))]
-    if matches!(
-        crate::backend::renderer::buffer_type(buffer),
-        Some(crate::backend::renderer::BufferType::Egl)
-    ) {
-        let bo = gbm
-            .import_buffer_object_from_wayland::<()>(buffer, gbm::BufferObjectFlags::SCANOUT)
-            .map(GbmBuffer::from_bo)
-            .map_err(Error::Import)?;
-        let (fb, format) = framebuffer_from_bo_internal(
-            drm,
-            BufferObjectInternal {
-                bo: &bo,
-                offsets: None,
-                pitches: None,
-            },
-            use_opaque,
-        )
-        .map_err(Error::Drm)?;
+    // TODO: Re-enable after updating wayland-rs
+    // #[cfg(all(feature = "backend_egl", feature = "use_system_lib"))]
+    // if matches!(
+    //     crate::backend::renderer::buffer_type(buffer),
+    //     Some(crate::backend::renderer::BufferType::Egl)
+    // ) {
+    //     let bo = gbm
+    //         .import_buffer_object_from_wayland::<()>(buffer, gbm::BufferObjectFlags::SCANOUT)
+    //         .map(GbmBuffer::from_bo)
+    //         .map_err(Error::Import)?;
+    //     let (fb, format) = framebuffer_from_bo_internal(
+    //         drm,
+    //         BufferObjectInternal {
+    //             bo: &bo,
+    //             offsets: None,
+    //             pitches: None,
+    //         },
+    //         use_opaque,
+    //     )
+    //     .map_err(Error::Drm)?;
 
-        return Ok(Some(GbmFramebuffer {
-            fb,
-            format,
-            drm: drm.clone(),
-        }));
-    }
+    //     return Ok(Some(GbmFramebuffer {
+    //         fb,
+    //         format,
+    //         drm: drm.clone(),
+    //     }));
+    // }
 
     Ok(None)
 }

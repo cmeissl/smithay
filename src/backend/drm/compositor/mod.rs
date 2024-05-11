@@ -324,7 +324,7 @@ impl ElementFramebufferCacheKey {
     #[inline]
     fn is_alive(&self) -> bool {
         match self.buffer {
-            ElementFramebufferCacheBuffer::Wayland(ref buffer) => buffer.upgrade().is_ok(),
+            ElementFramebufferCacheBuffer::Wayland(ref buffer) => buffer.is_alive(),
         }
     }
 }
@@ -1408,19 +1408,19 @@ impl OverlayPlaneElementIds {
         // matches or generate a new Id (and update the element id)
         let existing = self.plane_ids.iter_mut().find(|(p, _, _)| p == plane);
         if let Some((_, plane_id, current_element_id)) = existing {
-                if current_element_id != element_id {
-                    *plane_id = Id::new();
+            if current_element_id != element_id {
+                *plane_id = Id::new();
                 *current_element_id = element_id.clone();
-                }
+            }
 
             plane_id.clone()
         } else {
-                let plane_id = Id::new();
+            let plane_id = Id::new();
 
             self.plane_ids
                 .push((*plane, plane_id.clone(), element_id.clone()));
 
-                plane_id
+            plane_id
         }
     }
 
@@ -3673,10 +3673,10 @@ where
 
         // Check if we have a free plane, otherwise we can exit early
         if self
-                .planes
-                .overlay
-                .iter()
-                .all(|plane| frame_state.is_assigned(plane.handle))
+            .planes
+            .overlay
+            .iter()
+            .all(|plane| frame_state.is_assigned(plane.handle))
         {
             trace!(
                 "skipping overlay planes for element {:?}, no free planes",
