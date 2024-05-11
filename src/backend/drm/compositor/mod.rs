@@ -2071,6 +2071,7 @@ where
         let mut output_elements: Vec<(&'a E, Rectangle<i32, Physical>, usize, bool)> =
             Vec::with_capacity(elements.len());
 
+        let mut element_opaque_regions_workhouse = Vec::with_capacity(10);
         for element in elements.iter() {
             let element_id = element.id();
             let element_geometry = element.geometry(output_scale);
@@ -2084,10 +2085,14 @@ where
             };
 
             // Then test if the element is completely hidden behind opaque regions
-            // FIXME: This should be possible to calculate without allocating
-            let element_visible_area = element_output_geometry
-                .subtract_rects(opaque_regions.iter().copied())
-                .into_iter()
+            element_opaque_regions_workhouse.clear();
+            element_opaque_regions_workhouse.push(element_output_geometry);
+            element_opaque_regions_workhouse = Rectangle::subtract_rects_many_in_place(
+                element_opaque_regions_workhouse,
+                opaque_regions.iter().copied(),
+            );
+            let element_visible_area = element_opaque_regions_workhouse
+                .iter()
                 .fold(0usize, |acc, item| acc + (item.size.w * item.size.h) as usize);
 
             if element_visible_area == 0 {
@@ -2105,10 +2110,13 @@ where
             }
 
             let element_opaque_regions = element.opaque_regions(output_scale);
-            // FIXME: This should be possible to calculate without allocating
-            let element_is_opaque = Rectangle::from_loc_and_size(Point::default(), element_geometry.size)
-                .subtract_rects(element_opaque_regions.iter().copied())
-                .is_empty();
+            element_opaque_regions_workhouse.clear();
+            element_opaque_regions_workhouse.push(element_output_geometry);
+            element_opaque_regions_workhouse = Rectangle::subtract_rects_many_in_place(
+                element_opaque_regions_workhouse,
+                element_opaque_regions.iter().copied(),
+            );
+            let element_is_opaque = element_opaque_regions_workhouse.is_empty();
 
             opaque_regions.extend(
                 element_opaque_regions
@@ -2330,6 +2338,7 @@ where
             .unwrap_or(false);
 
         if render {
+            profiling::scope!("rendering");
             trace!(
                 "rendering {} elements on the primary {:?}",
                 primary_plane_elements.len(),
@@ -3432,6 +3441,7 @@ where
         // we got the same id multiple times. If we can't find it we use the previous
         // state if available
         if !element_states.contains_key(element_id) {
+            profiling::scope!("init_state");
             let previous_fb_cache = self
                 .previous_element_states
                 .get_mut(element_id)
