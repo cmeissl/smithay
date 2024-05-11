@@ -135,3 +135,6 @@ harness = false
 [profile.release-with-debug]
 inherits = "release"
 debug = true
+
+[patch.crates-io]
+drm-fourcc = { git = 'https://github.com/cmeissl/drm-fourcc-rs.git', branch = "feature/inline" }
