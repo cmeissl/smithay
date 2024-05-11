@@ -2849,25 +2849,7 @@ where
         E: RenderElement<R>,
     {
         // Check if we have a free plane, otherwise we can exit early
-        if !self.direct_scanout
-            || ((self.planes.overlay.is_empty()
-                || self
-                    .planes
-                    .overlay
-                    .iter()
-                    .all(|plane| frame_state.is_assigned(plane.handle)))
-                && self
-                    .planes
-                    .cursor
-                    .as_ref()
-                    .map(|plane| frame_state.is_assigned(plane.handle))
-                    .unwrap_or(true)
-                && (!try_assign_primary_plane
-                    || frame_state
-                        .plane_state(self.planes.primary.handle)
-                        .map(|state| state.element_state.is_some())
-                        .unwrap_or(true)))
-        {
+        if !self.direct_scanout {
             trace!(
                 "skipping direct scan-out for element {:?}, no free planes",
                 element.id()
@@ -2964,6 +2946,14 @@ where
         R: Renderer,
         E: RenderElement<R>,
     {
+        if frame_state
+            .plane_state(self.planes.primary.handle)
+            .map(|state| state.element_state.is_some())
+            .unwrap_or(true)
+        {
+            return Err(None);
+        }
+
         let element_config = self.element_config(
             renderer,
             element,
@@ -3672,8 +3662,7 @@ where
         let element_id = element.id();
 
         // Check if we have a free plane, otherwise we can exit early
-        if self.planes.overlay.is_empty()
-            || self
+        if self
                 .planes
                 .overlay
                 .iter()
