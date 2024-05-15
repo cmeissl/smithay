@@ -416,7 +416,7 @@ pub fn run_winit() {
             }
         }
 
-        let result = event_loop.dispatch(Some(Duration::from_millis(1)), &mut state);
+        let result = event_loop.dispatch(Some(Duration::from_millis(16)), &mut state);
         if result.is_err() {
             state.running.store(false, Ordering::SeqCst);
         } else {

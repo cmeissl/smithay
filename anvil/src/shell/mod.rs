@@ -111,33 +111,33 @@ impl<BackendData: Backend> CompositorHandler for AnvilState<BackendData> {
     }
 
     fn new_surface(&mut self, surface: &WlSurface) {
-        add_pre_commit_hook::<Self, _>(surface, move |state, _dh, surface| {
-            let maybe_dmabuf = with_states(surface, |surface_data| {
-                surface_data
-                    .cached_state
-                    .pending::<SurfaceAttributes>()
-                    .buffer
-                    .as_ref()
-                    .and_then(|assignment| match assignment {
-                        BufferAssignment::NewBuffer(buffer) => get_dmabuf(buffer).cloned().ok(),
-                        _ => None,
-                    })
-            });
-            if let Some(dmabuf) = maybe_dmabuf {
-                if let Ok((blocker, source)) = dmabuf.generate_blocker(Interest::READ) {
-                    if let Some(client) = surface.client() {
-                        let res = state.handle.insert_source(source, move |_, _, data| {
-                            let dh = data.display_handle.clone();
-                            data.client_compositor_state(&client).blocker_cleared(data, &dh);
-                            Ok(())
-                        });
-                        if res.is_ok() {
-                            add_blocker(surface, blocker);
-                        }
-                    }
-                }
-            }
-        });
+        // add_pre_commit_hook::<Self, _>(surface, move |state, _dh, surface| {
+        //     let maybe_dmabuf = with_states(surface, |surface_data| {
+        //         surface_data
+        //             .cached_state
+        //             .pending::<SurfaceAttributes>()
+        //             .buffer
+        //             .as_ref()
+        //             .and_then(|assignment| match assignment {
+        //                 BufferAssignment::NewBuffer(buffer) => get_dmabuf(buffer).cloned().ok(),
+        //                 _ => None,
+        //             })
+        //     });
+        //     if let Some(dmabuf) = maybe_dmabuf {
+        //         if let Ok((blocker, source)) = dmabuf.generate_blocker(Interest::READ) {
+        //             if let Some(client) = surface.client() {
+        //                 let res = state.handle.insert_source(source, move |_, _, data| {
+        //                     let dh = data.display_handle.clone();
+        //                     data.client_compositor_state(&client).blocker_cleared(data, &dh);
+        //                     Ok(())
+        //                 });
+        //                 if res.is_ok() {
+        //                     add_blocker(surface, blocker);
+        //                 }
+        //             }
+        //         }
+        //     }
+        // });
     }
 
     fn commit(&mut self, surface: &WlSurface) {
