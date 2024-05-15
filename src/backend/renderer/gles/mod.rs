@@ -2750,14 +2750,21 @@ impl<'frame> GlesFrame<'frame> {
                 std::ptr::null(),
             );
 
+            // TODO: Use a ring buffer with a fixed size
             gl.EnableVertexAttribArray(self.renderer.solid_program.attrib_position as u32);
-            gl.BindBuffer(ffi::ARRAY_BUFFER, self.renderer.vbos[1]);
-            gl.BufferData(
-                ffi::ARRAY_BUFFER,
-                (std::mem::size_of::<ffi::types::GLfloat>() * self.renderer.vertices.len()) as isize,
-                self.renderer.vertices.as_ptr() as *const _,
-                ffi::STREAM_DRAW,
-            );
+            gl.BindBuffer(ffi::ARRAY_BUFFER, 0);
+            // gl.BindBuffer(ffi::ARRAY_BUFFER, self.renderer.vbos[1]);
+            // gl.BufferData(
+            //     ffi::ARRAY_BUFFER,
+            //     (std::mem::size_of::<ffi::types::GLfloat>() * self.renderer.vertices.len()) as isize,
+            //     self.renderer.vertices.as_ptr() as *const _,
+            //     ffi::STREAM_DRAW,
+            // );
+
+            // let mut pos: [ffi::types::GLfloat; 84] = [0f32; 84];
+            // for (i, f) in self.renderer.vertices.iter().enumerate() {
+            //     pos[i] = *f;
+            // }
 
             gl.VertexAttribPointer(
                 self.renderer.solid_program.attrib_position as u32,
@@ -2765,7 +2772,7 @@ impl<'frame> GlesFrame<'frame> {
                 ffi::FLOAT,
                 ffi::FALSE,
                 0,
-                std::ptr::null(),
+                self.renderer.vertices.as_ptr() as *const _,
             );
 
             let damage_len = damage.len() as i32;
@@ -2776,28 +2783,28 @@ impl<'frame> GlesFrame<'frame> {
 
                 gl.DrawArraysInstanced(ffi::TRIANGLE_STRIP, 0, 4, damage_len);
             } else {
-                // When we have more than 10 rectangles, draw them in batches of 10.
-                for i in 0..(damage_len - 1) / 10 {
-                    gl.DrawArrays(ffi::TRIANGLES, 0, 60);
+                // // When we have more than 10 rectangles, draw them in batches of 10.
+                // for i in 0..(damage_len - 1) / 10 {
+                //     gl.DrawArrays(ffi::TRIANGLES, 0, 60);
 
-                    // Set damage pointer to the next 10 rectangles.
-                    let offset = (i + 1) as usize * 60 * 4 * std::mem::size_of::<ffi::types::GLfloat>();
-                    gl.VertexAttribPointer(
-                        self.renderer.solid_program.attrib_position as u32,
-                        4,
-                        ffi::FLOAT,
-                        ffi::FALSE,
-                        0,
-                        offset as *const _,
-                    );
-                }
+                //     // Set damage pointer to the next 10 rectangles.
+                //     let offset = (i + 1) as usize * 60 * 4 * std::mem::size_of::<ffi::types::GLfloat>();
+                //     gl.VertexAttribPointer(
+                //         self.renderer.solid_program.attrib_position as u32,
+                //         4,
+                //         ffi::FLOAT,
+                //         ffi::FALSE,
+                //         0,
+                //         offset as *const _,
+                //     );
+                // }
 
                 // Draw the up to 10 remaining rectangles.
-                let count = ((damage_len - 1) % 10 + 1) * 6;
+                let count = damage_len * 6;
                 gl.DrawArrays(ffi::TRIANGLES, 0, count);
             }
 
-            gl.BindBuffer(ffi::ARRAY_BUFFER, 0);
+            //gl.BindBuffer(ffi::ARRAY_BUFFER, 0);
             gl.DisableVertexAttribArray(self.renderer.solid_program.attrib_vert as u32);
             gl.DisableVertexAttribArray(self.renderer.solid_program.attrib_position as u32);
         }
@@ -3017,14 +3024,16 @@ impl<'frame> GlesFrame<'frame> {
             );
 
             // vert_position
+            // TODO: Use a ring buffer with a fixed size
             gl.EnableVertexAttribArray(program.attrib_vert_position as u32);
-            gl.BindBuffer(ffi::ARRAY_BUFFER, self.renderer.vbos[1]);
-            gl.BufferData(
-                ffi::ARRAY_BUFFER,
-                (std::mem::size_of::<ffi::types::GLfloat>() * self.renderer.vertices.len()) as isize,
-                self.renderer.vertices.as_ptr() as *const _,
-                ffi::STREAM_DRAW,
-            );
+            gl.BindBuffer(ffi::ARRAY_BUFFER, 0);
+            // gl.BindBuffer(ffi::ARRAY_BUFFER, self.renderer.vbos[1]);
+            // gl.BufferData(
+            //     ffi::ARRAY_BUFFER,
+            //     (std::mem::size_of::<ffi::types::GLfloat>() * self.renderer.vertices.len()) as isize,
+            //     self.renderer.vertices.as_ptr() as *const _,
+            //     ffi::STREAM_DRAW,
+            // );
 
             gl.VertexAttribPointer(
                 program.attrib_vert_position as u32,
@@ -3032,7 +3041,7 @@ impl<'frame> GlesFrame<'frame> {
                 ffi::FLOAT,
                 ffi::FALSE,
                 0,
-                std::ptr::null(),
+                self.renderer.vertices.as_ptr() as *const _,
             );
 
             if self.renderer.capabilities.contains(&Capability::Instancing) {
@@ -3041,28 +3050,28 @@ impl<'frame> GlesFrame<'frame> {
 
                 gl.DrawArraysInstanced(ffi::TRIANGLE_STRIP, 0, 4, damage_len as i32);
             } else {
-                // When we have more than 10 rectangles, draw them in batches of 10.
-                for i in 0..(damage_len - 1) / 10 {
-                    gl.DrawArrays(ffi::TRIANGLES, 0, 6);
+                // // When we have more than 10 rectangles, draw them in batches of 10.
+                // for i in 0..(damage_len - 1) / 10 {
+                //     gl.DrawArrays(ffi::TRIANGLES, 0, 6);
 
-                    // Set damage pointer to the next 10 rectangles.
-                    let offset = (i + 1) * 6 * 4 * std::mem::size_of::<ffi::types::GLfloat>();
-                    gl.VertexAttribPointer(
-                        program.attrib_vert_position as u32,
-                        4,
-                        ffi::FLOAT,
-                        ffi::FALSE,
-                        0,
-                        offset as *const _,
-                    );
-                }
+                //     // Set damage pointer to the next 10 rectangles.
+                //     let offset = (i + 1) * 6 * 4 * std::mem::size_of::<ffi::types::GLfloat>();
+                //     gl.VertexAttribPointer(
+                //         program.attrib_vert_position as u32,
+                //         4,
+                //         ffi::FLOAT,
+                //         ffi::FALSE,
+                //         0,
+                //         offset as *const _,
+                //     );
+                // }
 
                 // Draw the up to 10 remaining rectangles.
-                let count = ((damage_len - 1) % 10 + 1) * 6;
+                let count = damage_len * 6;
                 gl.DrawArrays(ffi::TRIANGLES, 0, count as i32);
             }
 
-            gl.BindBuffer(ffi::ARRAY_BUFFER, 0);
+            //gl.BindBuffer(ffi::ARRAY_BUFFER, 0);
             gl.BindTexture(target, 0);
             gl.DisableVertexAttribArray(program.attrib_vert as u32);
             gl.DisableVertexAttribArray(program.attrib_vert_position as u32);
@@ -3192,14 +3201,16 @@ impl<'frame> GlesFrame<'frame> {
             );
 
             // vert_position
+            // TODO: Use a ring buffer with a fixed size
             gl.EnableVertexAttribArray(program.attrib_position as u32);
-            gl.BindBuffer(ffi::ARRAY_BUFFER, self.renderer.vbos[1]);
-            gl.BufferData(
-                ffi::ARRAY_BUFFER,
-                (std::mem::size_of::<ffi::types::GLfloat>() * self.renderer.vertices.len()) as isize,
-                self.renderer.vertices.as_ptr() as *const _,
-                ffi::STREAM_DRAW,
-            );
+            gl.BindBuffer(ffi::ARRAY_BUFFER, 0);
+            // gl.BindBuffer(ffi::ARRAY_BUFFER, self.renderer.vbos[1]);
+            // gl.BufferData(
+            //     ffi::ARRAY_BUFFER,
+            //     (std::mem::size_of::<ffi::types::GLfloat>() * self.renderer.vertices.len()) as isize,
+            //     self.renderer.vertices.as_ptr() as *const _,
+            //     ffi::STREAM_DRAW,
+            // );
 
             gl.VertexAttribPointer(
                 program.attrib_position as u32,
@@ -3207,7 +3218,7 @@ impl<'frame> GlesFrame<'frame> {
                 ffi::FLOAT,
                 ffi::FALSE,
                 0,
-                std::ptr::null(),
+                self.renderer.vertices.as_ptr() as *const _,
             );
 
             let damage_len = damage.len() as i32;
@@ -3217,28 +3228,28 @@ impl<'frame> GlesFrame<'frame> {
 
                 gl.DrawArraysInstanced(ffi::TRIANGLE_STRIP, 0, 4, damage_len);
             } else {
-                // When we have more than 10 rectangles, draw them in batches of 10.
-                for i in 0..(damage_len - 1) / 10 {
-                    gl.DrawArrays(ffi::TRIANGLES, 0, 6);
+                // // When we have more than 10 rectangles, draw them in batches of 10.
+                // for i in 0..(damage_len - 1) / 10 {
+                //     gl.DrawArrays(ffi::TRIANGLES, 0, 6);
 
-                    // Set damage pointer to the next 10 rectangles.
-                    let offset = (i + 1) as usize * 6 * 4 * std::mem::size_of::<ffi::types::GLfloat>();
-                    gl.VertexAttribPointer(
-                        program.attrib_position as u32,
-                        4,
-                        ffi::FLOAT,
-                        ffi::FALSE,
-                        0,
-                        offset as *const _,
-                    );
-                }
+                //     // Set damage pointer to the next 10 rectangles.
+                //     let offset = (i + 1) as usize * 6 * 4 * std::mem::size_of::<ffi::types::GLfloat>();
+                //     gl.VertexAttribPointer(
+                //         program.attrib_position as u32,
+                //         4,
+                //         ffi::FLOAT,
+                //         ffi::FALSE,
+                //         0,
+                //         offset as *const _,
+                //     );
+                // }
 
                 // Draw the up to 10 remaining rectangles.
-                let count = ((damage_len - 1) % 10 + 1) * 6;
+                let count = damage_len * 6;
                 gl.DrawArrays(ffi::TRIANGLES, 0, count);
             }
 
-            gl.BindBuffer(ffi::ARRAY_BUFFER, 0);
+            //gl.BindBuffer(ffi::ARRAY_BUFFER, 0);
             gl.DisableVertexAttribArray(program.attrib_vert as u32);
             gl.DisableVertexAttribArray(program.attrib_position as u32);
         }
