@@ -210,7 +210,7 @@ use crate::{
 use super::{
     element::{Element, Id, RenderElement, RenderElementState, RenderElementStates},
     sync::SyncPoint,
-    utils::CommitCounter,
+    utils::{CommitCounter, OpaqueRegions},
     Bind,
 };
 
@@ -286,7 +286,7 @@ pub struct OutputDamageTracker {
     damage_shaper: DamageShaper,
     damage: Vec<Rectangle<i32, Physical>>,
     element_damage: Vec<Rectangle<i32, Physical>>,
-    opaque_regions: Vec<(usize, Vec<Rectangle<i32, Physical>>)>,
+    opaque_regions: Vec<OpaqueRegions<i32, Physical>>,
     span: tracing::Span,
 }
 
@@ -488,9 +488,14 @@ impl OutputDamageTracker {
     where
         E: Element,
     {
-        self.damage.clear();
-        self.element_damage.clear();
-        self.opaque_regions.clear();
+        {
+            profiling::scope!("init");
+            self.damage.clear();
+            self.damage.reserve(elements.len());
+            self.element_damage.clear();
+            self.opaque_regions.clear();
+            self.opaque_regions.reserve(elements.len());
+        }
 
         let mut element_render_states = RenderElementStates {
             states: HashMap::with_capacity(elements.len()),
@@ -502,152 +507,165 @@ impl OutputDamageTracker {
         // We use an explicit z-index because the following loop can skip
         // elements that are completely hidden and we want the z-index to
         // match when enumerating the render elements later
-        let mut z_index = 0;
-        for element in elements.iter() {
-            let element_id = element.id();
-            let element_loc = element.geometry(output_scale).loc;
+        {
+            profiling::scope!("prepare_render_elements");
+            let mut element_visible_area_workhouse = Vec::with_capacity(elements.len());
+            for element in elements.iter() {
+                let element_id = element.id();
+                let element_loc = element.geometry(output_scale).loc;
 
-            // First test if the element overlaps with the output
-            // if not we can skip it
-            let element_output_geometry = match element.geometry(output_scale).intersection(output_geo) {
-                Some(geo) => geo,
-                None => continue,
-            };
+                // First test if the element overlaps with the output
+                // if not we can skip it
+                let element_output_geometry = match element.geometry(output_scale).intersection(output_geo) {
+                    Some(geo) => geo,
+                    None => continue,
+                };
 
-            // Then test if the element is completely hidden behind opaque regions
-            // FIXME: We should be able to calculate that without allocating a temp vec
-            let element_visible_area = element_output_geometry
-                .subtract_rects(self.opaque_regions.iter().flat_map(|(_, r)| r).copied())
-                .into_iter()
-                .fold(0usize, |acc, item| acc + (item.size.w * item.size.h) as usize);
-
-            // No need to draw a completely hidden element
-            if element_visible_area == 0 {
-                // We allow multiple instance of a single element, so do not
-                // override the state if we already have one
-                if !element_render_states.states.contains_key(element_id) {
-                    element_render_states
-                        .states
-                        .insert(element_id.clone(), RenderElementState::skipped());
-                }
-                continue;
-            }
-
-            // FIXME: Getting rid of this allocation requires to return a reference and
-            // this needs changes in the element trait
-            let element_output_damage = element
-                .damage_since(
-                    output_scale,
-                    self.last_state.elements.get(element.id()).map(|s| s.last_commit),
-                )
-                .into_iter()
-                .map(|mut d| {
-                    d.loc += element_loc;
-                    d
-                })
-                .filter_map(|geo| geo.intersection(output_geo));
-            self.damage.extend(element_output_damage);
-
-            // FIXME: This will be a bit more tricky, but should be doable.
-            // It is necessary that we can sort/filter the opaque regions, but having
-            // a vec in a vec...
-            let element_opaque_regions = element
-                .opaque_regions(output_scale)
-                .into_iter()
-                .map(|mut region| {
-                    region.loc += element_loc;
-                    region
-                })
-                .filter_map(|geo| geo.intersection(output_geo))
-                .collect::<Vec<_>>();
-            self.opaque_regions.push((z_index, element_opaque_regions));
-            render_elements.push(element);
-
-            if let Some(state) = element_render_states.states.get_mut(element_id) {
-                if matches!(state.presentation_state, RenderElementPresentationState::Skipped) {
-                    *state = RenderElementState::rendered(element_visible_area);
-                } else {
-                    state.visible_area += element_visible_area;
-                }
-            } else {
-                element_render_states.states.insert(
-                    element_id.clone(),
-                    RenderElementState::rendered(element_visible_area),
+                // Then test if the element is completely hidden behind opaque regions
+                element_visible_area_workhouse.clear();
+                element_visible_area_workhouse.push(element_output_geometry);
+                element_visible_area_workhouse = Rectangle::subtract_rects_many_in_place(
+                    element_visible_area_workhouse,
+                    self.opaque_regions.iter().flat_map(|r| &**r).copied(),
                 );
-            }
-            z_index += 1;
-        }
-
-        // add the damage for elements gone that are not covered an opaque region
-        let elements_gone = self.last_state.elements.iter().filter(|(id, _)| {
-            element_render_states
-                .states
-                .get(id)
-                .map(|state| state.presentation_state == RenderElementPresentationState::Skipped)
-                .unwrap_or(true)
-        });
-
-        for (_, state) in elements_gone {
-            element_damage.clear();
-            element_damage.extend(
-                state
-                    .last_instances
+                let element_visible_area = element_visible_area_workhouse
                     .iter()
-                    .filter_map(|i| i.last_geometry.intersection(output_geo)),
-            );
-            element_damage = Rectangle::subtract_rects_many_in_place(
-                element_damage,
-                self.opaque_regions
-                    .iter()
-                    .filter(|(z_index, _)| state.last_instances.iter().any(|i| *z_index < i.last_z_index))
-                    .flat_map(|(_, opaque_regions)| opaque_regions)
-                    .copied(),
-            );
-            self.damage.extend_from_slice(&element_damage);
-        }
+                    .fold(0usize, |acc, item| acc + (item.size.w * item.size.h) as usize);
 
-        // if the element has been moved or it's alpha or z index changed, damage it
-        for (z_index, element) in render_elements.iter().enumerate() {
-            let element_src = element.src();
-            let element_geometry = element.geometry(output_scale);
-            let element_transform = element.transform();
-            let element_alpha = element.alpha();
-            let element_last_state = self.last_state.elements.get(element.id());
-
-            if element_last_state
-                .map(|s| {
-                    !s.instance_matches(
-                        element_src,
-                        element_geometry,
-                        element_transform,
-                        element_alpha,
-                        z_index,
-                    )
-                })
-                .unwrap_or(true)
-            {
-                element_damage.clear();
-                if let Some(damage) = element_geometry.intersection(output_geo) {
-                    element_damage.push(damage);
+                // No need to draw a completely hidden element
+                if element_visible_area == 0 {
+                    // We allow multiple instance of a single element, so do not
+                    // override the state if we already have one
+                    if !element_render_states.states.contains_key(element_id) {
+                        element_render_states
+                            .states
+                            .insert(element_id.clone(), RenderElementState::skipped());
+                    }
+                    continue;
                 }
-                if let Some(state) = element_last_state {
-                    element_damage.extend(
-                        state
-                            .last_instances
-                            .iter()
-                            .filter_map(|i| i.last_geometry.intersection(output_geo)),
+
+                let element_output_damage = element
+                    .damage_since(
+                        output_scale,
+                        self.last_state.elements.get(element_id).map(|s| s.last_commit),
+                    )
+                    .into_iter()
+                    .map(|mut d| {
+                        d.loc += element_loc;
+                        d
+                    })
+                    .filter_map(|geo| geo.intersection(output_geo));
+                self.damage.extend(element_output_damage);
+
+                let element_opaque_regions = element
+                    .opaque_regions(output_scale)
+                    .into_iter()
+                    .map(|mut region| {
+                        region.loc += element_loc;
+                        region
+                    })
+                    .filter_map(|geo| geo.intersection(output_geo))
+                    .collect::<OpaqueRegions<_, _>>();
+                self.opaque_regions.push(element_opaque_regions);
+                render_elements.push(element);
+
+                if let Some(state) = element_render_states.states.get_mut(element_id) {
+                    if matches!(state.presentation_state, RenderElementPresentationState::Skipped) {
+                        *state = RenderElementState::rendered(element_visible_area);
+                    } else {
+                        state.visible_area += element_visible_area;
+                    }
+                } else {
+                    element_render_states.states.insert(
+                        element_id.clone(),
+                        RenderElementState::rendered(element_visible_area),
                     );
                 }
+            }
+        }
 
+        {
+            profiling::scope!("elements_gone");
+            // add the damage for elements gone that are not covered an opaque region
+            let elements_gone = self.last_state.elements.iter().filter(|(id, _)| {
+                element_render_states
+                    .states
+                    .get(id)
+                    .map(|state| state.presentation_state == RenderElementPresentationState::Skipped)
+                    .unwrap_or(true)
+            });
+
+            for (_, state) in elements_gone {
+                element_damage.clear();
+                element_damage.extend(
+                    state
+                        .last_instances
+                        .iter()
+                        .filter_map(|i| i.last_geometry.intersection(output_geo)),
+                );
+                let min_last_z_index = state
+                    .last_instances
+                    .iter()
+                    .map(|i| i.last_z_index)
+                    .min()
+                    .unwrap_or_default();
                 element_damage = Rectangle::subtract_rects_many_in_place(
                     element_damage,
                     self.opaque_regions
                         .iter()
-                        .filter(|(index, _)| *index < z_index)
-                        .flat_map(|(_, opaque_regions)| opaque_regions)
+                        .take(min_last_z_index)
+                        .flat_map(|opaque_regions| &**opaque_regions)
                         .copied(),
                 );
                 self.damage.extend_from_slice(&element_damage);
+            }
+        }
+
+        {
+            profiling::scope!("elements_moved");
+            // if the element has been moved or it's alpha or z index changed, damage it
+            for (z_index, element) in render_elements.iter().enumerate() {
+                let element_src = element.src();
+                let element_geometry = element.geometry(output_scale);
+                let element_transform = element.transform();
+                let element_alpha = element.alpha();
+                let element_last_state = self.last_state.elements.get(element.id());
+
+                if element_last_state
+                    .map(|s| {
+                        !s.instance_matches(
+                            element_src,
+                            element_geometry,
+                            element_transform,
+                            element_alpha,
+                            z_index,
+                        )
+                    })
+                    .unwrap_or(true)
+                {
+                    element_damage.clear();
+                    if let Some(damage) = element_geometry.intersection(output_geo) {
+                        element_damage.push(damage);
+                    }
+                    if let Some(state) = element_last_state {
+                        element_damage.extend(
+                            state
+                                .last_instances
+                                .iter()
+                                .filter_map(|i| i.last_geometry.intersection(output_geo)),
+                        );
+                    }
+
+                    element_damage = Rectangle::subtract_rects_many_in_place(
+                        element_damage,
+                        self.opaque_regions
+                            .iter()
+                            .take(z_index)
+                            .flat_map(|opaque_regions| &**opaque_regions)
+                            .copied(),
+                    );
+                    self.damage.extend_from_slice(&element_damage);
+                }
             }
         }
 
@@ -656,7 +674,7 @@ impl OutputDamageTracker {
         element_damage.extend_from_slice(&self.last_state.opaque_regions);
         element_damage = Rectangle::subtract_rects_many_in_place(
             element_damage,
-            self.opaque_regions.iter().flat_map(|(_, r)| r).copied(),
+            self.opaque_regions.iter().flat_map(|r| &**r).copied(),
         );
         self.damage.extend_from_slice(&element_damage);
 
@@ -772,7 +790,7 @@ impl OutputDamageTracker {
         self.last_state.opaque_regions.clear();
         self.last_state
             .opaque_regions
-            .extend(self.opaque_regions.iter().flat_map(|(_, r)| r.iter().copied()));
+            .extend(self.opaque_regions.iter().flat_map(|r| r.iter().copied()));
         self.last_state.opaque_regions.shrink_to_fit();
 
         element_render_states
@@ -838,21 +856,13 @@ impl OutputDamageTracker {
             element_damage.extend_from_slice(&self.damage);
             element_damage = Rectangle::subtract_rects_many_in_place(
                 element_damage,
-                self.opaque_regions
-                    .iter()
-                    .flat_map(|(_, regions)| regions)
-                    .copied(),
+                self.opaque_regions.iter().flat_map(|regions| &**regions).copied(),
             );
 
             trace!("clearing damage {:?}", element_damage);
             frame.clear(clear_color, &element_damage)?;
 
-            for (mut z_index, element) in render_elements.iter().rev().enumerate() {
-                // This is necessary because we reversed the render elements to draw
-                // them back to front, but z-index including opaque regions is defined
-                // front to back
-                z_index = render_elements.len() - 1 - z_index;
-
+            for (z_index, element) in render_elements.iter().rev().enumerate() {
                 let element_id = element.id();
                 let element_geometry = element.geometry(output_scale);
 
@@ -866,8 +876,9 @@ impl OutputDamageTracker {
                     element_damage,
                     self.opaque_regions
                         .iter()
-                        .filter(|(index, _)| *index < z_index)
-                        .flat_map(|(_, regions)| regions)
+                        .rev()
+                        .skip(z_index + 1)
+                        .flat_map(|regions| &**regions)
                         .copied(),
                 );
                 element_damage.iter_mut().for_each(|d| {
