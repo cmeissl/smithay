@@ -141,6 +141,8 @@ impl<BackendData: Backend> CompositorHandler for AnvilState<BackendData> {
     }
 
     fn commit(&mut self, surface: &WlSurface) {
+        self.needs_refresh = true;
+
         #[cfg(feature = "xwayland")]
         X11Wm::commit_hook(self, surface);
 

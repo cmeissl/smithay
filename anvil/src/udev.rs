@@ -472,7 +472,10 @@ pub fn run_udev() {
         if result.is_err() {
             state.running.store(false, Ordering::SeqCst);
         } else {
-            state.space.refresh();
+            if state.needs_refresh {
+                state.space.refresh();
+                state.needs_refresh = false;
+            }
             state.popups.cleanup();
             display_handle.flush_clients().unwrap();
         }

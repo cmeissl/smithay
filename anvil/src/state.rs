@@ -169,6 +169,8 @@ pub struct AnvilState<BackendData: Backend + 'static> {
     #[cfg(feature = "debug")]
     pub renderdoc: Option<renderdoc::RenderDoc<renderdoc::V141>>,
 
+    pub needs_refresh: bool,
+
     pub show_window_preview: bool,
 }
 
@@ -671,6 +673,8 @@ impl<BackendData: Backend + 'static> AnvilState<BackendData> {
             #[cfg(feature = "debug")]
             renderdoc: renderdoc::RenderDoc::new().ok(),
             show_window_preview: false,
+
+            needs_refresh: false,
         }
     }
 
