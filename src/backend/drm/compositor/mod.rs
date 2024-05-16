@@ -2106,9 +2106,9 @@ where
             // Then test if the element is completely hidden behind opaque regions
             element_opaque_regions_workhouse.clear();
             element_opaque_regions_workhouse.push(element_output_geometry);
-            element_opaque_regions_workhouse = Rectangle::subtract_rects_many_in_place(
+            element_opaque_regions_workhouse = Rectangle::subtract_rects_many_in_place_ref(
                 element_opaque_regions_workhouse,
-                opaque_regions.iter().copied(),
+                opaque_regions.iter(),
             );
             let element_visible_area = element_opaque_regions_workhouse
                 .iter()
@@ -2131,9 +2131,9 @@ where
             let element_opaque_regions = element.opaque_regions(output_scale);
             element_opaque_regions_workhouse.clear();
             element_opaque_regions_workhouse.push(element_output_geometry);
-            element_opaque_regions_workhouse = Rectangle::subtract_rects_many_in_place(
+            element_opaque_regions_workhouse = Rectangle::subtract_rects_many_in_place_ref(
                 element_opaque_regions_workhouse,
-                element_opaque_regions.iter().copied(),
+                element_opaque_regions.iter(),
             );
             let element_is_opaque = element_opaque_regions_workhouse.is_empty();
 

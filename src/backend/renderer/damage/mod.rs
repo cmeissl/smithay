@@ -232,6 +232,7 @@ struct ElementInstanceState {
 }
 
 impl ElementInstanceState {
+    #[inline]
     fn matches(
         &self,
         src: Rectangle<f64, BufferCoords>,
@@ -255,6 +256,7 @@ struct ElementState {
 }
 
 impl ElementState {
+    #[inline]
     fn instance_matches(
         &self,
         src: Rectangle<f64, BufferCoords>,
@@ -492,7 +494,6 @@ impl OutputDamageTracker {
             profiling::scope!("init");
             self.damage.clear();
             self.damage.reserve(elements.len());
-            self.element_damage.clear();
             self.opaque_regions.clear();
             self.opaque_regions.reserve(elements.len());
         }
@@ -524,9 +525,9 @@ impl OutputDamageTracker {
                 // Then test if the element is completely hidden behind opaque regions
                 element_visible_area_workhouse.clear();
                 element_visible_area_workhouse.push(element_output_geometry);
-                element_visible_area_workhouse = Rectangle::subtract_rects_many_in_place(
+                element_visible_area_workhouse = Rectangle::subtract_rects_many_in_place_ref(
                     element_visible_area_workhouse,
-                    self.opaque_regions.iter().flat_map(|r| &**r).copied(),
+                    self.opaque_regions.iter().flat_map(|r| &**r),
                 );
                 let element_visible_area = element_visible_area_workhouse
                     .iter()
@@ -596,28 +597,12 @@ impl OutputDamageTracker {
             });
 
             for (_, state) in elements_gone {
-                element_damage.clear();
-                element_damage.extend(
+                self.damage.extend(
                     state
                         .last_instances
                         .iter()
                         .filter_map(|i| i.last_geometry.intersection(output_geo)),
                 );
-                let min_last_z_index = state
-                    .last_instances
-                    .iter()
-                    .map(|i| i.last_z_index)
-                    .min()
-                    .unwrap_or_default();
-                element_damage = Rectangle::subtract_rects_many_in_place(
-                    element_damage,
-                    self.opaque_regions
-                        .iter()
-                        .take(min_last_z_index)
-                        .flat_map(|opaque_regions| &**opaque_regions)
-                        .copied(),
-                );
-                self.damage.extend_from_slice(&element_damage);
             }
         }
 
@@ -643,28 +628,17 @@ impl OutputDamageTracker {
                     })
                     .unwrap_or(true)
                 {
-                    element_damage.clear();
-                    if let Some(damage) = element_geometry.intersection(output_geo) {
-                        element_damage.push(damage);
+                    if let Some(intersection) = element_geometry.intersection(output_geo) {
+                        self.damage.push(intersection);
                     }
                     if let Some(state) = element_last_state {
-                        element_damage.extend(
+                        self.damage.extend(
                             state
                                 .last_instances
                                 .iter()
                                 .filter_map(|i| i.last_geometry.intersection(output_geo)),
                         );
                     }
-
-                    element_damage = Rectangle::subtract_rects_many_in_place(
-                        element_damage,
-                        self.opaque_regions
-                            .iter()
-                            .take(z_index)
-                            .flat_map(|opaque_regions| &**opaque_regions)
-                            .copied(),
-                    );
-                    self.damage.extend_from_slice(&element_damage);
                 }
             }
         }
@@ -672,9 +646,9 @@ impl OutputDamageTracker {
         // damage regions no longer covered by opaque regions
         element_damage.clear();
         element_damage.extend_from_slice(&self.last_state.opaque_regions);
-        element_damage = Rectangle::subtract_rects_many_in_place(
+        element_damage = Rectangle::subtract_rects_many_in_place_ref(
             element_damage,
-            self.opaque_regions.iter().flat_map(|r| &**r).copied(),
+            self.opaque_regions.iter().flat_map(|r| &**r),
         );
         self.damage.extend_from_slice(&element_damage);
 
@@ -854,9 +828,9 @@ impl OutputDamageTracker {
 
             element_damage.clear();
             element_damage.extend_from_slice(&self.damage);
-            element_damage = Rectangle::subtract_rects_many_in_place(
+            element_damage = Rectangle::subtract_rects_many_in_place_ref(
                 element_damage,
-                self.opaque_regions.iter().flat_map(|regions| &**regions).copied(),
+                self.opaque_regions.iter().flat_map(|regions| &**regions),
             );
 
             trace!("clearing damage {:?}", element_damage);
@@ -872,14 +846,13 @@ impl OutputDamageTracker {
                         .iter()
                         .filter_map(|d| d.intersection(element_geometry)),
                 );
-                element_damage = Rectangle::subtract_rects_many_in_place(
+                element_damage = Rectangle::subtract_rects_many_in_place_ref(
                     element_damage,
                     self.opaque_regions
                         .iter()
                         .rev()
                         .skip(z_index + 1)
-                        .flat_map(|regions| &**regions)
-                        .copied(),
+                        .flat_map(|regions| &**regions),
                 );
                 element_damage.iter_mut().for_each(|d| {
                     d.loc -= element_geometry.loc;

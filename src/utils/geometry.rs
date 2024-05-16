@@ -1199,11 +1199,99 @@ impl<N: Coordinate, Kind> Rectangle<N, Kind> {
             let mut checked = 0usize;
             let mut index = 0usize;
 
+            if items == 0 {
+                return rects;
+            }
+
             while checked != items {
                 checked += 1;
 
                 // If there is no overlap there is nothing to subtract
                 let Some(intersection) = rects[index].intersection(other) else {
+                    index += 1;
+                    continue;
+                };
+
+                // We now know that we have to subtract the other rect
+                let item = rects.remove(index);
+
+                // If we are completely contained then nothing is left
+                if other.contains_rect(item) {
+                    continue;
+                }
+
+                let top_rect = Rectangle::from_loc_and_size(
+                    item.loc,
+                    (item.size.w, intersection.loc.y.saturating_sub(item.loc.y)),
+                );
+                let left_rect: Rectangle<N, Kind> = Rectangle::from_loc_and_size(
+                    (item.loc.x, intersection.loc.y),
+                    (intersection.loc.x.saturating_sub(item.loc.x), intersection.size.h),
+                );
+                let right_rect: Rectangle<N, Kind> = Rectangle::from_loc_and_size(
+                    (
+                        intersection.loc.x.saturating_add(intersection.size.w),
+                        intersection.loc.y,
+                    ),
+                    (
+                        (item.loc.x.saturating_add(item.size.w))
+                            .saturating_sub(intersection.loc.x.saturating_add(intersection.size.w)),
+                        intersection.size.h,
+                    ),
+                );
+                let bottom_rect: Rectangle<N, Kind> = Rectangle::from_loc_and_size(
+                    (item.loc.x, intersection.loc.y.saturating_add(intersection.size.h)),
+                    (
+                        item.size.w,
+                        (item.loc.y.saturating_add(item.size.h))
+                            .saturating_sub(intersection.loc.y.saturating_add(intersection.size.h)),
+                    ),
+                );
+
+                if !top_rect.is_empty() {
+                    rects.push(top_rect);
+                }
+
+                if !left_rect.is_empty() {
+                    rects.push(left_rect);
+                }
+
+                if !right_rect.is_empty() {
+                    rects.push(right_rect);
+                }
+
+                if !bottom_rect.is_empty() {
+                    rects.push(bottom_rect);
+                }
+            }
+        }
+
+        rects
+    }
+
+    /// Subtract a set of [`Rectangle`]s from a set [`Rectangle`]s in-place
+    pub fn subtract_rects_many_in_place_ref<'a>(
+        mut rects: Vec<Self>,
+        others: impl IntoIterator<Item = &'a Self>,
+    ) -> Vec<Self>
+    where
+        N: 'a,
+        Kind: 'a,
+    {
+        for other in others.into_iter() {
+            let items = rects.len();
+            let mut checked = 0usize;
+            let mut index = 0usize;
+
+            if items == 0 {
+                return rects;
+            }
+
+            while checked != items {
+                checked += 1;
+
+                // If there is no overlap there is nothing to subtract
+                let Some(intersection) = unsafe { rects.get_unchecked(index) }.intersection(*other) else {
                     index += 1;
                     continue;
                 };
