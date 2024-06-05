@@ -1314,6 +1314,10 @@ impl GlesRenderer {
         unsafe {
             self.gl.BindTexture(target, tex);
             self.gl.EGLImageTargetTexture2DOES(target, image);
+            self.gl.TexParameteri(ffi::TEXTURE_EXTERNAL_OES, ffi::TEXTURE_MIN_FILTER, ffi::LINEAR as ffi::types::GLint);
+            self.gl.TexParameteri(ffi::TEXTURE_EXTERNAL_OES, ffi::TEXTURE_MAG_FILTER, ffi::LINEAR as ffi::types::GLint);
+            self.gl.TexParameteri(ffi::TEXTURE_EXTERNAL_OES, ffi::TEXTURE_WRAP_S, ffi::CLAMP_TO_EDGE as ffi::types::GLint);
+            self.gl.TexParameteri(ffi::TEXTURE_EXTERNAL_OES, ffi::TEXTURE_WRAP_T, ffi::CLAMP_TO_EDGE as ffi::types::GLint);
             self.gl.BindTexture(target, 0);
         }
 
