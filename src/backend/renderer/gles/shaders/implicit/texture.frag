@@ -21,7 +21,7 @@ uniform float tint;
 #endif
 
 void main() {
-    vec4 color = vec4(1.0, 0.0, 0.0, 1.0);
+    vec4 color = texture2D(tex, v_coords);
 
 #if defined(NO_ALPHA)
     color = vec4(color.rgb, 1.0) * alpha;
