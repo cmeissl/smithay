@@ -2472,21 +2472,21 @@ impl<'frame> Frame for GlesFrame<'frame> {
     #[instrument(level = "trace", parent = &self.span, skip(self))]
     #[profiling::function]
     fn clear(&mut self, color: [f32; 4], at: &[Rectangle<i32, Physical>]) -> Result<(), GlesError> {
-        if at.is_empty() {
-            return Ok(());
-        }
+        // if at.is_empty() {
+             return Ok(());
+        // }
 
-        unsafe {
-            self.renderer.gl.Disable(ffi::BLEND);
-        }
+        // unsafe {
+        //     self.renderer.gl.Disable(ffi::BLEND);
+        // }
 
-        let res = self.draw_solid(Rectangle::from_loc_and_size((0, 0), self.size), at, color);
+        // let res = self.draw_solid(Rectangle::from_loc_and_size((0, 0), self.size), at, color);
 
-        unsafe {
-            self.renderer.gl.Enable(ffi::BLEND);
-            self.renderer.gl.BlendFunc(ffi::ONE, ffi::ONE_MINUS_SRC_ALPHA);
-        }
-        res
+        // unsafe {
+        //     self.renderer.gl.Enable(ffi::BLEND);
+        //     self.renderer.gl.BlendFunc(ffi::ONE, ffi::ONE_MINUS_SRC_ALPHA);
+        // }
+        // res
     }
 
     #[instrument(level = "trace", skip(self), parent = &self.span)]
