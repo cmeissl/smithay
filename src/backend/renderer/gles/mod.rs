@@ -2472,6 +2472,11 @@ impl<'frame> Frame for GlesFrame<'frame> {
     #[instrument(level = "trace", parent = &self.span, skip(self))]
     #[profiling::function]
     fn clear(&mut self, color: [f32; 4], at: &[Rectangle<i32, Physical>]) -> Result<(), GlesError> {
+        unsafe {
+            self.renderer.gl.ClearColor(0f32, 0f32, 1f32, 1f32);
+            self.renderer.gl.Clear(ffi::COLOR_BUFFER_BIT)
+        }
+
         // if at.is_empty() {
              return Ok(());
         // }
@@ -2670,6 +2675,7 @@ impl<'frame> GlesFrame<'frame> {
         damage: &[Rectangle<i32, Physical>],
         color: [f32; 4],
     ) -> Result<(), GlesError> {
+        return Ok(());
         if damage.is_empty() {
             return Ok(());
         }
@@ -2831,8 +2837,6 @@ impl<'frame> GlesFrame<'frame> {
         program: Option<&GlesTexProgram>,
         additional_uniforms: &[Uniform<'_>],
     ) -> Result<(), GlesError> {
-        return self.draw_solid(dest, damage, [0f32, 1f32, 0f32, 1f32]);
-
         let mut mat = Matrix3::<f32>::identity();
 
         // dest position and scale
