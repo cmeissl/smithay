@@ -1693,9 +1693,6 @@ impl Bind<Dmabuf> for GlesRenderer {
                         self.gl.BindFramebuffer(ffi::FRAMEBUFFER, fbo);
                         self.gl.FramebufferTexture2D(ffi::FRAMEBUFFER, ffi::COLOR_ATTACHMENT0, ffi::TEXTURE_2D, tex, 0);
 
-                            self.gl.ClearColor(0.5, 0.5, 0.5, 1.0);
-                            self.gl.Clear(ffi::COLOR_BUFFER_BIT);
-
                         let status = self.gl.CheckFramebufferStatus(ffi::FRAMEBUFFER);
 
                                             if status != ffi::FRAMEBUFFER_COMPLETE {
@@ -2503,7 +2500,10 @@ impl<'frame> Frame for GlesFrame<'frame> {
     #[instrument(level = "trace", parent = &self.span, skip(self))]
     #[profiling::function]
     fn clear(&mut self, color: [f32; 4], at: &[Rectangle<i32, Physical>]) -> Result<(), GlesError> {
-        
+        unsafe {
+            self.renderer.gl.ClearColor(0.5, 0.5, 0.5, 1.0);
+            self.renderer.gl.Clear(ffi::DEPTH_BITS);
+        }
         
         return self.draw_solid(Rectangle::from_loc_and_size((0, 0), self.size), &[Rectangle::from_loc_and_size((0, 0), self.size)], [0f32, 0f32, 1f32, 1f32]);
 
