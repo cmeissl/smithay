@@ -2675,7 +2675,6 @@ impl<'frame> GlesFrame<'frame> {
         damage: &[Rectangle<i32, Physical>],
         color: [f32; 4],
     ) -> Result<(), GlesError> {
-        return Ok(());
         if damage.is_empty() {
             return Ok(());
         }
