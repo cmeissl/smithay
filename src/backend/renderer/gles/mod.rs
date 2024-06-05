@@ -1,6 +1,7 @@
 //! Implementation of the rendering traits using OpenGL ES 2
 
 use cgmath::{prelude::*, Matrix3, Vector2};
+use rand::Rng;
 use core::slice;
 use std::{
     collections::{HashMap, HashSet},
@@ -2472,8 +2473,10 @@ impl<'frame> Frame for GlesFrame<'frame> {
     #[instrument(level = "trace", parent = &self.span, skip(self))]
     #[profiling::function]
     fn clear(&mut self, color: [f32; 4], at: &[Rectangle<i32, Physical>]) -> Result<(), GlesError> {
+        let r = rand::thread_rng().gen_range(0..=255) as f32 / 255f32;
+
         unsafe {
-            self.renderer.gl.ClearColor(0f32, 0f32, 1f32, 1f32);
+            self.renderer.gl.ClearColor(0f32, 0f32, r, 1f32);
             self.renderer.gl.Clear(ffi::COLOR_BUFFER_BIT)
         }
 
