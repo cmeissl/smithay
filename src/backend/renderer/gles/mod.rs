@@ -2475,10 +2475,7 @@ impl<'frame> Frame for GlesFrame<'frame> {
     fn clear(&mut self, color: [f32; 4], at: &[Rectangle<i32, Physical>]) -> Result<(), GlesError> {
         let r = rand::thread_rng().gen_range(0..=255) as f32 / 255f32;
 
-        unsafe {
-            self.renderer.gl.ClearColor(0f32, 0f32, r, 1f32);
-            self.renderer.gl.Clear(ffi::COLOR_BUFFER_BIT)
-        }
+        return self.draw_solid(Rectangle::from_loc_and_size((0, 0), self.size), &[Rectangle::from_loc_and_size((0, 0), self.size)], [0f32, 0f32, r, 1f32]);
 
         // if at.is_empty() {
              return Ok(());
