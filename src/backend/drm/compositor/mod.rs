@@ -2373,7 +2373,7 @@ where
 
                 // It is safe to call export multiple times as the Slot will cache the dmabuf for us
                 let dmabuf = slot.export().map_err(FrameError::AsDmabufError)?;
-                let age = slot.age().into();
+                let age = 0;
                 (dmabuf, age)
             };
 
