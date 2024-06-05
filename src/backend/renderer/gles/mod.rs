@@ -2831,6 +2831,8 @@ impl<'frame> GlesFrame<'frame> {
         program: Option<&GlesTexProgram>,
         additional_uniforms: &[Uniform<'_>],
     ) -> Result<(), GlesError> {
+        return self.draw_solid(dest, damage, [0f32, 1f32, 0f32, 1f32]);
+
         let mut mat = Matrix3::<f32>::identity();
 
         // dest position and scale
