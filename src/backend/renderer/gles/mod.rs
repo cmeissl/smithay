@@ -1679,13 +1679,13 @@ impl Bind<Dmabuf> for GlesRenderer {
                         self.gl.TexParameteri(ffi::TEXTURE_EXTERNAL_OES, ffi::TEXTURE_MAG_FILTER, ffi::LINEAR as ffi::types::GLint);
                         self.gl.TexParameteri(ffi::TEXTURE_EXTERNAL_OES, ffi::TEXTURE_WRAP_S, ffi::CLAMP_TO_EDGE as ffi::types::GLint);
                         self.gl.TexParameteri(ffi::TEXTURE_EXTERNAL_OES, ffi::TEXTURE_WRAP_T, ffi::CLAMP_TO_EDGE as ffi::types::GLint);
+                        self.gl.BindTexture(ffi::TEXTURE_2D, 0);
 
                         self.gl.GenFramebuffers(1, &mut fbo as *mut _);
                         self.gl.BindFramebuffer(ffi::FRAMEBUFFER, fbo);
                         self.gl.FramebufferTexture2D(ffi::FRAMEBUFFER, ffi::COLOR_ATTACHMENT0, ffi::TEXTURE_2D, tex, 0);
 
                         let status = self.gl.CheckFramebufferStatus(ffi::FRAMEBUFFER);
-                                            self.gl.BindFramebuffer(ffi::FRAMEBUFFER, 0);
 
                                             if status != ffi::FRAMEBUFFER_COMPLETE {
                                                 //TODO wrap image and drop here
