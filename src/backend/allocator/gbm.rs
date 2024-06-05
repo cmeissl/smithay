@@ -173,41 +173,41 @@ impl<A: AsFd + 'static> GbmAllocator<A> {
         modifiers: &[Modifier],
         flags: GbmBufferFlags,
     ) -> Result<GbmBuffer, std::io::Error> {
-        #[cfg(feature = "backend_gbm_has_create_with_modifiers2")]
-        let result = self
-            .device
-            .create_buffer_object_with_modifiers2(width, height, fourcc, modifiers.iter().copied(), flags)
-            .map(|bo| GbmBuffer::from_bo(bo, false));
+        // #[cfg(feature = "backend_gbm_has_create_with_modifiers2")]
+        // let result = self
+        //     .device
+        //     .create_buffer_object_with_modifiers2(width, height, fourcc, modifiers.iter().copied(), flags)
+        //     .map(|bo| GbmBuffer::from_bo(bo, false));
 
-        #[cfg(not(feature = "backend_gbm_has_create_with_modifiers2"))]
-        let result = if (flags & !(GbmBufferFlags::SCANOUT | GbmBufferFlags::RENDERING)).is_empty() {
-            self.device
-                .create_buffer_object_with_modifiers(width, height, fourcc, modifiers.iter().copied())
-                .map(|bo| GbmBuffer::from_bo(bo, false))
-        } else if modifiers.contains(&Modifier::Invalid) || modifiers.contains(&Modifier::Linear) {
+        // #[cfg(not(feature = "backend_gbm_has_create_with_modifiers2"))]
+        // let result = if (flags & !(GbmBufferFlags::SCANOUT | GbmBufferFlags::RENDERING)).is_empty() {
+        //     self.device
+        //         .create_buffer_object_with_modifiers(width, height, fourcc, modifiers.iter().copied())
+        //         .map(|bo| GbmBuffer::from_bo(bo, false))
+        // } else if modifiers.contains(&Modifier::Invalid) || modifiers.contains(&Modifier::Linear) {
             return self
                 .device
                 .create_buffer_object(width, height, fourcc, flags)
-                .map(|bo| GbmBuffer::from_bo(bo, true));
-        } else {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "unsupported combination of flags and modifiers",
-            ));
-        };
+                .map(|bo| GbmBuffer::from_bo(bo, false));
+        // } else {
+        //     return Err(std::io::Error::new(
+        //         std::io::ErrorKind::Other,
+        //         "unsupported combination of flags and modifiers",
+        //     ));
+        // };
 
-        match result {
-            Ok(bo) => Ok(bo),
-            Err(err) => {
-                if modifiers.contains(&Modifier::Invalid) || modifiers.contains(&Modifier::Linear) {
-                    self.device
-                        .create_buffer_object(width, height, fourcc, flags)
-                        .map(|bo| GbmBuffer::from_bo(bo, true))
-                } else {
-                    Err(err)
-                }
-            }
-        }
+        // match result {
+        //     Ok(bo) => Ok(bo),
+        //     Err(err) => {
+        //         if modifiers.contains(&Modifier::Invalid) || modifiers.contains(&Modifier::Linear) {
+        //             self.device
+        //                 .create_buffer_object(width, height, fourcc, flags)
+        //                 .map(|bo| GbmBuffer::from_bo(bo, true))
+        //         } else {
+        //             Err(err)
+        //         }
+        //     }
+        // }
     }
 }
 
