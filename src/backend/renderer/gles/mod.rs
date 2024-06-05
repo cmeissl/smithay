@@ -2308,19 +2308,19 @@ impl Renderer for GlesRenderer {
             self.gl.Enable(ffi::BLEND);
             self.gl.BlendFunc(ffi::ONE, ffi::ONE_MINUS_SRC_ALPHA);
 
-            if self
-                .target
-                .as_ref()
-                .map(|target| target.has_shadow())
-                .unwrap_or(false)
-            {
-                // Enable stencil testing and clear the shadow buffer for blending onto the actual framebuffer in finish
-                self.gl.Enable(ffi::STENCIL_TEST);
-                self.gl.StencilFunc(ffi::ALWAYS, 1, ffi::types::GLuint::MAX);
-                self.gl.StencilOp(ffi::REPLACE, ffi::REPLACE, ffi::REPLACE);
-                self.gl.StencilMask(ffi::types::GLuint::MAX);
-                self.gl.Clear(ffi::COLOR_BUFFER_BIT | ffi::STENCIL_BUFFER_BIT);
-            }
+            // if self
+            //     .target
+            //     .as_ref()
+            //     .map(|target| target.has_shadow())
+            //     .unwrap_or(false)
+            // {
+            //     // Enable stencil testing and clear the shadow buffer for blending onto the actual framebuffer in finish
+            //     self.gl.Enable(ffi::STENCIL_TEST);
+            //     self.gl.StencilFunc(ffi::ALWAYS, 1, ffi::types::GLuint::MAX);
+            //     self.gl.StencilOp(ffi::REPLACE, ffi::REPLACE, ffi::REPLACE);
+            //     self.gl.StencilMask(ffi::types::GLuint::MAX);
+            //     self.gl.Clear(ffi::COLOR_BUFFER_BIT | ffi::STENCIL_BUFFER_BIT);
+            // }
         }
 
         // Handle the width/height swap when the output is rotated by 90°/270°.
@@ -2564,63 +2564,63 @@ impl<'frame> GlesFrame<'frame> {
             self.renderer.gl.Disable(ffi::BLEND);
         }
 
-        if let Some(target) = self.renderer.target.as_ref() {
-            if let Some(shadow) = target.get_shadow() {
-                target.make_current_no_shadow(
-                    &self.renderer.gl,
-                    &self.renderer.egl,
-                    Some((shadow.fbo, shadow.stencil)),
-                )?;
-                unsafe {
-                    self.renderer
-                        .gl
-                        .StencilFunc(ffi::NOTEQUAL, 0, ffi::types::GLuint::MAX);
-                    self.renderer.gl.StencilMask(0);
+        // if let Some(target) = self.renderer.target.as_ref() {
+        //     if let Some(shadow) = target.get_shadow() {
+        //         target.make_current_no_shadow(
+        //             &self.renderer.gl,
+        //             &self.renderer.egl,
+        //             Some((shadow.fbo, shadow.stencil)),
+        //         )?;
+        //         unsafe {
+        //             self.renderer
+        //                 .gl
+        //                 .StencilFunc(ffi::NOTEQUAL, 0, ffi::types::GLuint::MAX);
+        //             self.renderer.gl.StencilMask(0);
 
-                    self.renderer.gl.ActiveTexture(ffi::TEXTURE0);
-                    self.renderer.gl.BindTexture(ffi::TEXTURE_2D, shadow.texture);
-                    self.renderer.gl.TexParameteri(
-                        ffi::TEXTURE_2D,
-                        ffi::TEXTURE_MIN_FILTER,
-                        ffi::NEAREST as i32,
-                    );
-                    self.renderer.gl.TexParameteri(
-                        ffi::TEXTURE_2D,
-                        ffi::TEXTURE_MAG_FILTER,
-                        ffi::NEAREST as i32,
-                    );
+        //             self.renderer.gl.ActiveTexture(ffi::TEXTURE0);
+        //             self.renderer.gl.BindTexture(ffi::TEXTURE_2D, shadow.texture);
+        //             self.renderer.gl.TexParameteri(
+        //                 ffi::TEXTURE_2D,
+        //                 ffi::TEXTURE_MIN_FILTER,
+        //                 ffi::NEAREST as i32,
+        //             );
+        //             self.renderer.gl.TexParameteri(
+        //                 ffi::TEXTURE_2D,
+        //                 ffi::TEXTURE_MAG_FILTER,
+        //                 ffi::NEAREST as i32,
+        //             );
 
-                    let program = self
-                        .renderer
-                        .output_program
-                        .as_ref()
-                        .expect("If we have a shadow buffer we have an output shader");
-                    self.renderer.gl.UseProgram(program.program);
-                    self.renderer.gl.Uniform1i(program.uniform_tex, 0);
+        //             let program = self
+        //                 .renderer
+        //                 .output_program
+        //                 .as_ref()
+        //                 .expect("If we have a shadow buffer we have an output shader");
+        //             self.renderer.gl.UseProgram(program.program);
+        //             self.renderer.gl.Uniform1i(program.uniform_tex, 0);
 
-                    self.renderer
-                        .gl
-                        .EnableVertexAttribArray(program.attrib_vert as u32);
-                    self.renderer
-                        .gl
-                        .BindBuffer(ffi::ARRAY_BUFFER, self.renderer.vbos[2]);
-                    self.renderer.gl.VertexAttribPointer(
-                        program.attrib_vert as u32,
-                        2,
-                        ffi::FLOAT,
-                        ffi::FALSE,
-                        0,
-                        std::ptr::null(),
-                    );
+        //             self.renderer
+        //                 .gl
+        //                 .EnableVertexAttribArray(program.attrib_vert as u32);
+        //             self.renderer
+        //                 .gl
+        //                 .BindBuffer(ffi::ARRAY_BUFFER, self.renderer.vbos[2]);
+        //             self.renderer.gl.VertexAttribPointer(
+        //                 program.attrib_vert as u32,
+        //                 2,
+        //                 ffi::FLOAT,
+        //                 ffi::FALSE,
+        //                 0,
+        //                 std::ptr::null(),
+        //             );
 
-                    self.renderer.gl.DrawArrays(ffi::TRIANGLE_STRIP, 0, 4);
+        //             self.renderer.gl.DrawArrays(ffi::TRIANGLE_STRIP, 0, 4);
 
-                    self.renderer.gl.BindBuffer(ffi::ARRAY_BUFFER, 0);
-                    self.renderer.gl.DisableVertexAttribArray(0);
-                    self.renderer.gl.Disable(ffi::STENCIL_TEST);
-                }
-            }
-        }
+        //             self.renderer.gl.BindBuffer(ffi::ARRAY_BUFFER, 0);
+        //             self.renderer.gl.DisableVertexAttribArray(0);
+        //             self.renderer.gl.Disable(ffi::STENCIL_TEST);
+        //         }
+        //     }
+        // }
 
         // delayed destruction until the next frame rendering.
         self.renderer.cleanup();
