@@ -98,7 +98,7 @@ impl GbmBuffer {
         let format = Format {
             code: bo.format().unwrap_or(Fourcc::Argb8888), // we got to return something, but this should never happen anyway
             modifier: if implicit {
-                Modifier::Invalid
+                Modifier::Linear
             } else {
                 bo.modifier().unwrap_or(Modifier::Invalid)
             },
@@ -188,7 +188,7 @@ impl<A: AsFd + 'static> GbmAllocator<A> {
             return self
                 .device
                 .create_buffer_object(width, height, fourcc, flags)
-                .map(|bo| GbmBuffer::from_bo(bo, false));
+                .map(|bo| GbmBuffer::from_bo(bo, true));
         // } else {
         //     return Err(std::io::Error::new(
         //         std::io::ErrorKind::Other,
