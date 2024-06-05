@@ -209,73 +209,90 @@ impl EGLContext {
             span.record("shared", shared.context as usize);
         }
 
-        let (pixel_format, config_id) = match config {
-            Some((attributes, reqs)) => {
-                let (format, config_id) = display.choose_config(attributes, reqs)?;
-                (Some(format), config_id)
-            }
-            None => {
-                if !display
-                    .extensions()
-                    .iter()
-                    .any(|x| x == "EGL_KHR_no_config_context")
-                    && !display
-                        .extensions()
-                        .iter()
-                        .any(|x| x == "EGL_MESA_configless_context")
-                    && !display
-                        .extensions()
-                        .iter()
-                        .any(|x| x == "EGL_KHR_surfaceless_context")
-                {
-                    return Err(Error::EglExtensionNotSupported(&[
-                        "EGL_KHR_no_config_context",
-                        "EGL_MESA_configless_context",
-                        "EGL_KHR_surfaceless_context",
-                    ]));
-                }
-                (None, ffi::egl::NO_CONFIG_KHR)
-            }
-        };
+        // let (pixel_format, config_id) = match config {
+        //     Some((attributes, reqs)) => {
+        //         let (format, config_id) = display.choose_config(attributes, reqs)?;
+        //         (Some(format), config_id)
+        //     }
+        //     None => {
+        //         if !display
+        //             .extensions()
+        //             .iter()
+        //             .any(|x| x == "EGL_KHR_no_config_context")
+        //             && !display
+        //                 .extensions()
+        //                 .iter()
+        //                 .any(|x| x == "EGL_MESA_configless_context")
+        //             && !display
+        //                 .extensions()
+        //                 .iter()
+        //                 .any(|x| x == "EGL_KHR_surfaceless_context")
+        //         {
+        //             return Err(Error::EglExtensionNotSupported(&[
+        //                 "EGL_KHR_no_config_context",
+        //                 "EGL_MESA_configless_context",
+        //                 "EGL_KHR_surfaceless_context",
+        //             ]));
+        //         }
+        //         (None, ffi::egl::NO_CONFIG_KHR)
+        //     }
+        // };
+        wrap_egl_call_bool(|| unsafe {
+            ffi::egl::BindAPI(ffi::egl::OPENGL_ES_API)
+        })
+        .map_err(Error::CreationFailed)?;
+
+       let (pixel_format, config_id) = display.choose_config(GlAttributes {
+        debug: false,
+        profile: None,
+        version: (0,0),
+        vsync: false,
+       }, PixelFormatRequirements {
+        alpha_bits: Some(1),
+        color_bits: Some(1),
+        depth_bits: Some(1),
+        float_color_buffer: false,
+        hardware_accelerated: Some(true),
+        multisampling: None,
+        stencil_bits: None,
+       })?;
+
 
         let mut context_attributes = Vec::with_capacity(12);
 
-        if let Some((attributes, _)) = config {
-            let version = attributes.version;
+        // if let Some((attributes, _)) = config {
+        //     let version = attributes.version;
 
-            if display.get_egl_version() >= (1, 5)
-                || display.extensions().iter().any(|s| s == "EGL_KHR_create_context")
-            {
-                trace!("Setting CONTEXT_MAJOR_VERSION to {}", version.0);
-                context_attributes.push(ffi::egl::CONTEXT_MAJOR_VERSION as i32);
-                context_attributes.push(version.0 as i32);
-                trace!("Setting CONTEXT_MINOR_VERSION to {}", version.1);
-                context_attributes.push(ffi::egl::CONTEXT_MINOR_VERSION as i32);
-                context_attributes.push(version.1 as i32);
+        //     if display.get_egl_version() >= (1, 5)
+        //         || display.extensions().iter().any(|s| s == "EGL_KHR_create_context")
+        //     {
+        //         trace!("Setting CONTEXT_MAJOR_VERSION to {}", version.0);
+        //         context_attributes.push(ffi::egl::CONTEXT_MAJOR_VERSION as i32);
+        //         context_attributes.push(version.0 as i32);
+        //         trace!("Setting CONTEXT_MINOR_VERSION to {}", version.1);
+        //         context_attributes.push(ffi::egl::CONTEXT_MINOR_VERSION as i32);
+        //         context_attributes.push(version.1 as i32);
 
-                if attributes.debug && display.get_egl_version() >= (1, 5) {
-                    trace!("Setting CONTEXT_OPENGL_DEBUG to TRUE");
-                    context_attributes.push(ffi::egl::CONTEXT_OPENGL_DEBUG as i32);
-                    context_attributes.push(ffi::egl::TRUE as i32);
-                }
+        //         if attributes.debug && display.get_egl_version() >= (1, 5) {
+        //             trace!("Setting CONTEXT_OPENGL_DEBUG to TRUE");
+        //             context_attributes.push(ffi::egl::CONTEXT_OPENGL_DEBUG as i32);
+        //             context_attributes.push(ffi::egl::TRUE as i32);
+        //         }
 
-                context_attributes.push(ffi::egl::CONTEXT_FLAGS_KHR as i32);
-                context_attributes.push(0);
-            } else if display.get_egl_version() >= (1, 3) {
-                trace!("Setting CONTEXT_CLIENT_VERSION to {}", version.0);
-                context_attributes.push(ffi::egl::CONTEXT_CLIENT_VERSION as i32);
-                context_attributes.push(version.0 as i32);
-            }
-        } else {
+        //         context_attributes.push(ffi::egl::CONTEXT_FLAGS_KHR as i32);
+        //         context_attributes.push(0);
+        //     } else if display.get_egl_version() >= (1, 3) {
+        //         trace!("Setting CONTEXT_CLIENT_VERSION to {}", version.0);
+        //         context_attributes.push(ffi::egl::CONTEXT_CLIENT_VERSION as i32);
+        //         context_attributes.push(version.0 as i32);
+        //     }
+        // } else {
             trace!("Setting CONTEXT_CLIENT_VERSION to 2");
             context_attributes.push(ffi::egl::CONTEXT_CLIENT_VERSION as i32);
             context_attributes.push(2);
-        }
+        //}
 
-        let has_context_priority = display
-            .extensions()
-            .iter()
-            .any(|x| x == "EGL_IMG_context_priority");
+        let has_context_priority = false;
         if let Some(priority) = priority {
             if !has_context_priority {
                 warn!(
@@ -342,7 +359,7 @@ impl EGLContext {
             context,
             display: display.clone(),
             config_id,
-            pixel_format,
+            pixel_format: Some(pixel_format),
             user_data: if let Some(shared) = shared {
                 shared.user_data.clone()
             } else {

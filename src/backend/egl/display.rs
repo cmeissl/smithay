@@ -407,48 +407,64 @@ impl EGLDisplay {
         let descriptor = {
             let mut out: Vec<c_int> = Vec::with_capacity(37);
 
-            if self.egl_version >= (1, 2) {
-                trace!("Setting COLOR_BUFFER_TYPE to RGB_BUFFER");
-                out.push(ffi::egl::COLOR_BUFFER_TYPE as c_int);
-                out.push(ffi::egl::RGB_BUFFER as c_int);
-            }
-
-            trace!("Setting SURFACE_TYPE to {}", self.surface_type);
-
             out.push(ffi::egl::SURFACE_TYPE as c_int);
-            out.push(self.surface_type);
+            out.push(ffi::egl::WINDOW_BIT as c_int);
 
-            match attributes.version {
-                (3, _) => {
-                    if self.egl_version < (1, 3) {
-                        error!("OpenglES 3.* is not supported on EGL Versions lower then 1.3");
-                        return Err(Error::NoAvailablePixelFormat);
-                    }
-                    trace!("Setting RENDERABLE_TYPE to OPENGL_ES3");
-                    out.push(ffi::egl::RENDERABLE_TYPE as c_int);
-                    out.push(ffi::egl::OPENGL_ES3_BIT as c_int);
-                    trace!("Setting CONFORMANT to OPENGL_ES3");
-                    out.push(ffi::egl::CONFORMANT as c_int);
-                    out.push(ffi::egl::OPENGL_ES3_BIT as c_int);
-                }
-                (2, _) => {
-                    if self.egl_version < (1, 3) {
-                        error!("OpenglES 2.* is not supported on EGL Versions lower then 1.3");
-                        return Err(Error::NoAvailablePixelFormat);
-                    }
-                    trace!("Setting RENDERABLE_TYPE to OPENGL_ES2");
-                    out.push(ffi::egl::RENDERABLE_TYPE as c_int);
-                    out.push(ffi::egl::OPENGL_ES2_BIT as c_int);
-                    trace!("Setting CONFORMANT to OPENGL_ES2");
-                    out.push(ffi::egl::CONFORMANT as c_int);
-                    out.push(ffi::egl::OPENGL_ES2_BIT as c_int);
-                }
-                ver => {
-                    return Err(Error::OpenGlVersionNotSupported(ver));
-                }
-            };
+            out.push(ffi::egl::RED_SIZE as c_int);
+            out.push(1 as c_int);
+            out.push(ffi::egl::GREEN_SIZE as c_int);
+            out.push(1 as c_int);
+            out.push(ffi::egl::BLUE_SIZE as c_int);
+            out.push(1 as c_int);
 
-            reqs.create_attributes(&mut out);
+            out.push(ffi::egl::RENDERABLE_TYPE as c_int);
+            out.push(ffi::egl::OPENGL_ES2_BIT as c_int);
+
+            out.push(ffi::egl::SAMPLES as c_int);
+            out.push(0 as c_int);
+
+            // if self.egl_version >= (1, 2) {
+            //     trace!("Setting COLOR_BUFFER_TYPE to RGB_BUFFER");
+            //     out.push(ffi::egl::COLOR_BUFFER_TYPE as c_int);
+            //     out.push(ffi::egl::RGB_BUFFER as c_int);
+            // }
+
+            // trace!("Setting SURFACE_TYPE to {}", self.surface_type);
+
+            // out.push(ffi::egl::SURFACE_TYPE as c_int);
+            // out.push(self.surface_type);
+
+            // match attributes.version {
+            //     (3, _) => {
+            //         if self.egl_version < (1, 3) {
+            //             error!("OpenglES 3.* is not supported on EGL Versions lower then 1.3");
+            //             return Err(Error::NoAvailablePixelFormat);
+            //         }
+            //         trace!("Setting RENDERABLE_TYPE to OPENGL_ES3");
+            //         out.push(ffi::egl::RENDERABLE_TYPE as c_int);
+            //         out.push(ffi::egl::OPENGL_ES3_BIT as c_int);
+            //         trace!("Setting CONFORMANT to OPENGL_ES3");
+            //         out.push(ffi::egl::CONFORMANT as c_int);
+            //         out.push(ffi::egl::OPENGL_ES3_BIT as c_int);
+            //     }
+            //     (2, _) => {
+            //         if self.egl_version < (1, 3) {
+            //             error!("OpenglES 2.* is not supported on EGL Versions lower then 1.3");
+            //             return Err(Error::NoAvailablePixelFormat);
+            //         }
+            //         trace!("Setting RENDERABLE_TYPE to OPENGL_ES2");
+            //         out.push(ffi::egl::RENDERABLE_TYPE as c_int);
+            //         out.push(ffi::egl::OPENGL_ES2_BIT as c_int);
+            //         trace!("Setting CONFORMANT to OPENGL_ES2");
+            //         out.push(ffi::egl::CONFORMANT as c_int);
+            //         out.push(ffi::egl::OPENGL_ES2_BIT as c_int);
+            //     }
+            //     ver => {
+            //         return Err(Error::OpenGlVersionNotSupported(ver));
+            //     }
+            // };
+
+            // reqs.create_attributes(&mut out);
             out.push(ffi::egl::NONE as c_int);
             out
         };
@@ -495,33 +511,33 @@ impl EGLDisplay {
             .iter()
             .copied()
             .map(|config| unsafe {
-                let mut min_swap_interval = 0;
-                wrap_egl_call_bool(|| {
-                    ffi::egl::GetConfigAttrib(
-                        **self.display,
-                        config,
-                        ffi::egl::MIN_SWAP_INTERVAL as ffi::egl::types::EGLint,
-                        &mut min_swap_interval,
-                    )
-                })?;
+                // let mut min_swap_interval = 0;
+                // wrap_egl_call_bool(|| {
+                //     ffi::egl::GetConfigAttrib(
+                //         **self.display,
+                //         config,
+                //         ffi::egl::MIN_SWAP_INTERVAL as ffi::egl::types::EGLint,
+                //         &mut min_swap_interval,
+                //     )
+                // })?;
 
-                if desired_swap_interval < min_swap_interval {
-                    return Ok(None);
-                }
+                // if desired_swap_interval < min_swap_interval {
+                //     return Ok(None);
+                // }
 
-                let mut max_swap_interval = 0;
-                wrap_egl_call_bool(|| {
-                    ffi::egl::GetConfigAttrib(
-                        **self.display,
-                        config,
-                        ffi::egl::MAX_SWAP_INTERVAL as ffi::egl::types::EGLint,
-                        &mut max_swap_interval,
-                    )
-                })?;
+                // let mut max_swap_interval = 0;
+                // wrap_egl_call_bool(|| {
+                //     ffi::egl::GetConfigAttrib(
+                //         **self.display,
+                //         config,
+                //         ffi::egl::MAX_SWAP_INTERVAL as ffi::egl::types::EGLint,
+                //         &mut max_swap_interval,
+                //     )
+                // })?;
 
-                if desired_swap_interval > max_swap_interval {
-                    return Ok(None);
-                }
+                // if desired_swap_interval > max_swap_interval {
+                //     return Ok(None);
+                // }
 
                 Ok(Some(config))
             })
