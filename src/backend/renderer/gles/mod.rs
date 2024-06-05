@@ -2906,6 +2906,8 @@ impl<'frame> GlesFrame<'frame> {
         program: Option<&GlesTexProgram>,
         additional_uniforms: &[Uniform<'_>],
     ) -> Result<(), GlesError> {
+        return Ok(());
+
         // prepare the vertices
         self.renderer.vertices.clear();
         let damage_len = if let Some(instances) = instances {
