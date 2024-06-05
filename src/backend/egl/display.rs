@@ -539,6 +539,21 @@ impl EGLDisplay {
                 //     return Ok(None);
                 // }
 
+                let mut visual_id = 0;
+                wrap_egl_call_bool(|| {
+                    ffi::egl::GetConfigAttrib(
+                        **self.display,
+                        config,
+                        ffi::egl::NATIVE_VISUAL_ID as ffi::egl::types::EGLint,
+                        &mut visual_id,
+                    )
+                })?;
+
+                if visual_id != 875713112 {
+                    return Ok(None);
+                }
+
+
                 Ok(Some(config))
             })
             .collect::<Result<Vec<Option<ffi::egl::types::EGLConfig>>, EGLError>>()
