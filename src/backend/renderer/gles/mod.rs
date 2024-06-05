@@ -2502,7 +2502,7 @@ impl<'frame> Frame for GlesFrame<'frame> {
     fn clear(&mut self, color: [f32; 4], at: &[Rectangle<i32, Physical>]) -> Result<(), GlesError> {
         unsafe {
         self.renderer.gl.ClearColor(0.5, 0.5, 0.5, 1.0);
-        self.renderer.gl.Clear(ffi::COLOR_BUFFER_BIT);
+        //self.renderer.gl.Clear(ffi::COLOR_BUFFER_BIT);
         }
         
         return self.draw_solid(Rectangle::from_loc_and_size((0, 0), self.size), &[Rectangle::from_loc_and_size((0, 0), self.size)], [0f32, 0f32, 1f32, 1f32]);
