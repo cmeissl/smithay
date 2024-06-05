@@ -415,6 +415,8 @@ pub struct GlesRenderer {
     // debug
     span: tracing::Span,
     gl_debug_span: Option<*mut tracing::Span>,
+
+    viewport_size: Option<Size<i32, Physical>>,
 }
 
 /// Handle to the currently rendered frame during [`GlesRenderer::render`](Renderer::render).
@@ -761,6 +763,8 @@ impl GlesRenderer {
             _not_send: std::ptr::null_mut(),
             span,
             gl_debug_span,
+
+            viewport_size: None,
         };
         renderer.egl.unbind()?;
         Ok(renderer)
@@ -2321,10 +2325,13 @@ impl Renderer for GlesRenderer {
         self.make_current()?;
 
         unsafe {
-            self.gl.Viewport(0, 0, output_size.w, output_size.h);
+            if self.viewport_size != Some(output_size) {
+                self.gl.Viewport(0, 0, output_size.w, output_size.h);
+                self.viewport_size = Some(output_size);
+            }
 
-            self.gl.Scissor(0, 0, output_size.w, output_size.h);
-            self.gl.Enable(ffi::SCISSOR_TEST);
+            // self.gl.Scissor(0, 0, output_size.w, output_size.h);
+            // self.gl.Enable(ffi::SCISSOR_TEST);
 
             self.gl.Enable(ffi::BLEND);
             self.gl.BlendFunc(ffi::ONE, ffi::ONE_MINUS_SRC_ALPHA);
@@ -2493,8 +2500,11 @@ impl<'frame> Frame for GlesFrame<'frame> {
     #[instrument(level = "trace", parent = &self.span, skip(self))]
     #[profiling::function]
     fn clear(&mut self, color: [f32; 4], at: &[Rectangle<i32, Physical>]) -> Result<(), GlesError> {
-        let r = rand::thread_rng().gen_range(0..=255) as f32 / 255f32;
-
+        unsafe {
+        self.renderer.gl.ClearColor(0.5, 0.5, 0.5, 1.0);
+        self.renderer.gl.Clear(ffi::COLOR_BUFFER_BIT);
+        }
+        
         return self.draw_solid(Rectangle::from_loc_and_size((0, 0), self.size), &[Rectangle::from_loc_and_size((0, 0), self.size)], [0f32, 0f32, 1f32, 1f32]);
 
         // if at.is_empty() {
@@ -2522,6 +2532,8 @@ impl<'frame> Frame for GlesFrame<'frame> {
         damage: &[Rectangle<i32, Physical>],
         color: [f32; 4],
     ) -> Result<(), Self::Error> {
+        return Ok(());
+
         if damage.is_empty() {
             return Ok(());
         }
