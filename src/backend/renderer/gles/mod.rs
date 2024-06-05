@@ -1285,11 +1285,11 @@ impl GlesRenderer {
 
         trace!("Re-using texture {:?} for {:?}", texture.0.texture, buffer);
         if let Some(egl_images) = texture.0.egl_images.as_ref() {
-            if egl_images[0] == ffi_egl::NO_IMAGE_KHR {
-                return Ok(None);
-            }
-            let tex = Some(texture.0.texture);
-            self.import_egl_image(egl_images[0], texture.0.is_external, tex)?;
+            // if egl_images[0] == ffi_egl::NO_IMAGE_KHR {
+                 return Ok(None);
+            // }
+            // let tex = Some(texture.0.texture);
+            // self.import_egl_image(egl_images[0], texture.0.is_external, tex)?;
         }
         Ok(Some(texture.clone()))
     }
