@@ -59,13 +59,14 @@ where
         drm: DrmSurface,
         mut allocator: A,
         color_formats: &[Fourcc],
-        renderer_formats: HashSet<Format>,
+        renderer_formats: impl IntoIterator<Item = Format>,
     ) -> Result<GbmBufferedSurface<A, U>, Error<A::Error>> {
         let span = info_span!(parent: drm.span(), "drm_gbm");
         let _guard = span.enter();
 
         let mut error = None;
         let drm = Arc::new(drm);
+        let renderer_formats = renderer_formats.into_iter().collect::<HashSet<_>>();
 
         for format in color_formats {
             debug!("Testing color format: {}", format);

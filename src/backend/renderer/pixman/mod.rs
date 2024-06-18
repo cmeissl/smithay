@@ -1,11 +1,11 @@
 //! Implementation of the rendering traits using pixman
 use std::{
-    collections::HashSet,
     rc::Rc,
     sync::atomic::{AtomicBool, Ordering},
 };
 
 use drm_fourcc::{DrmFormat, DrmFourcc, DrmModifier};
+use indexmap::IndexSet;
 use pixman::{Filter, FormatCode, Image, Operation, Repeat};
 use tracing::warn;
 
@@ -1164,9 +1164,9 @@ impl Bind<Dmabuf> for PixmanRenderer {
         Ok(())
     }
 
-    fn supported_formats(&self) -> Option<HashSet<DrmFormat>> {
+    fn supported_formats(&self) -> Option<IndexSet<DrmFormat>> {
         lazy_static::lazy_static! {
-            static ref DMABUF_FORMATS: HashSet<DrmFormat> = {
+            static ref DMABUF_FORMATS: IndexSet<DrmFormat> = {
                 SUPPORTED_FORMATS.iter().copied().map(|code| DrmFormat {
                     code,
                     modifier: DrmModifier::Linear,
@@ -1199,9 +1199,9 @@ impl Bind<PixmanRenderBuffer> for PixmanRenderer {
         Ok(())
     }
 
-    fn supported_formats(&self) -> Option<HashSet<DrmFormat>> {
+    fn supported_formats(&self) -> Option<IndexSet<DrmFormat>> {
         lazy_static::lazy_static! {
-            static ref RENDER_BUFFER_FORMATS: HashSet<DrmFormat> = {
+            static ref RENDER_BUFFER_FORMATS: IndexSet<DrmFormat> = {
                 SUPPORTED_FORMATS.iter().copied().map(|code| DrmFormat {
                     code,
                     modifier: DrmModifier::Linear,

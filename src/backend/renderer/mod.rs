@@ -7,12 +7,12 @@
 //!
 //! - Raw OpenGL ES 2
 
-use std::collections::HashSet;
 use std::error::Error;
 use std::fmt;
 
 use crate::utils::{Buffer as BufferCoord, Physical, Point, Rectangle, Scale, Size, Transform};
 use cgmath::Matrix3;
+use indexmap::IndexSet;
 
 #[cfg(feature = "wayland_frontend")]
 use crate::wayland::{compositor::SurfaceData, shm::fourcc_to_shm_format};
@@ -107,7 +107,7 @@ pub trait Bind<Target>: Unbind {
     /// or throw an error.
     fn bind(&mut self, target: Target) -> Result<(), <Self as Renderer>::Error>;
     /// Supported pixel formats for given targets, if applicable.
-    fn supported_formats(&self) -> Option<HashSet<crate::backend::allocator::Format>> {
+    fn supported_formats(&self) -> Option<IndexSet<crate::backend::allocator::Format>> {
         None
     }
 }

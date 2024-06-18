@@ -188,7 +188,7 @@
 mod dispatch;
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     ffi::CString,
     ops::Sub,
     os::unix::io::AsFd,
@@ -198,7 +198,7 @@ use std::{
     },
 };
 
-use indexmap::IndexSet;
+use indexmap::{IndexMap, IndexSet};
 use rustix::fs::{seek, SeekFrom};
 use wayland_protocols::wp::linux_dmabuf::zv1::server::{
     zwp_linux_buffer_params_v1::{self, ZwpLinuxBufferParamsV1},
@@ -701,12 +701,12 @@ impl DmabufState {
             .unwrap()
             .into_iter()
             .fold(
-                HashMap::<Fourcc, HashSet<Modifier>>::new(),
+                IndexMap::<Fourcc, IndexSet<Modifier>>::new(),
                 |mut formats, format| {
                     if let Some(modifiers) = formats.get_mut(&format.code) {
                         modifiers.insert(format.modifier);
                     } else {
-                        formats.insert(format.code, HashSet::from_iter(std::iter::once(format.modifier)));
+                        formats.insert(format.code, IndexSet::from_iter(std::iter::once(format.modifier)));
                     }
                     formats
                 },
@@ -792,7 +792,7 @@ impl DmabufState {
 #[allow(missing_debug_implementations)]
 pub struct DmabufGlobalData {
     filter: Box<dyn for<'c> Fn(&'c Client) -> bool + Send + Sync>,
-    formats: Arc<HashMap<Fourcc, HashSet<Modifier>>>,
+    formats: Arc<IndexMap<Fourcc, IndexSet<Modifier>>>,
     default_feedback: Option<Arc<Mutex<DmabufFeedback>>>,
     known_default_feedbacks:
         Arc<Mutex<Vec<wayland_server::Weak<zwp_linux_dmabuf_feedback_v1::ZwpLinuxDmabufFeedbackV1>>>>,
@@ -802,7 +802,7 @@ pub struct DmabufGlobalData {
 /// Data associated with a dmabuf global protocol object.
 #[derive(Debug)]
 pub struct DmabufData {
-    formats: Arc<HashMap<Fourcc, HashSet<Modifier>>>,
+    formats: Arc<IndexMap<Fourcc, IndexSet<Modifier>>>,
     id: usize,
 
     default_feedback: Option<Arc<Mutex<DmabufFeedback>>>,
@@ -827,7 +827,7 @@ pub struct DmabufParamsData {
     /// Whether the params protocol object has been used before to create a wl_buffer.
     used: AtomicBool,
 
-    formats: Arc<HashMap<Fourcc, HashSet<Modifier>>>,
+    formats: Arc<IndexMap<Fourcc, IndexSet<Modifier>>>,
 
     /// Pending planes for the params.
     modifier: Mutex<Option<Modifier>>,

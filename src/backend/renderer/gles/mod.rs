@@ -2,8 +2,9 @@
 
 use cgmath::{prelude::*, Matrix3, Vector2};
 use core::slice;
+use indexmap::IndexSet;
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     ffi::{CStr, CString},
     fmt, mem,
     os::raw::c_char,
@@ -1706,7 +1707,7 @@ impl Bind<Dmabuf> for GlesRenderer {
         Ok(())
     }
 
-    fn supported_formats(&self) -> Option<HashSet<Format>> {
+    fn supported_formats(&self) -> Option<IndexSet<Format>> {
         Some(self.egl.display().dmabuf_render_formats().clone())
     }
 }

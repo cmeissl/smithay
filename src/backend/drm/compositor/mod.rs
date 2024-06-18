@@ -1609,7 +1609,7 @@ where
         mut allocator: A,
         framebuffer_exporter: F,
         color_formats: &[DrmFourcc],
-        renderer_formats: HashSet<DrmFormat>,
+        renderer_formats: impl IntoIterator<Item = DrmFormat>,
         cursor_size: Size<u32, BufferCoords>,
         gbm: Option<GbmDevice<G>>,
     ) -> FrameResult<Self, A, F> {
@@ -1621,6 +1621,7 @@ where
         );
 
         let output_mode_source = output_mode_source.into();
+        let renderer_formats = renderer_formats.into_iter().collect::<HashSet<_>>();
 
         let mut error = None;
         let surface = Arc::new(surface);

@@ -1,10 +1,10 @@
 //! EGL context related structs
 use std::{
-    collections::HashSet,
     os::raw::c_int,
     sync::{atomic::Ordering, Arc},
 };
 
+use indexmap::IndexSet;
 use libc::c_void;
 
 use super::{ffi, wrap_egl_call_bool, wrap_egl_call_ptr, EGLError, Error, MakeCurrentError};
@@ -454,12 +454,12 @@ impl EGLContext {
     }
 
     /// Returns a list of formats for dmabufs that can be rendered to.
-    pub fn dmabuf_render_formats(&self) -> &HashSet<DrmFormat> {
+    pub fn dmabuf_render_formats(&self) -> &IndexSet<DrmFormat> {
         self.display.dmabuf_render_formats()
     }
 
     /// Returns a list of formats for dmabufs that can be used as textures.
-    pub fn dmabuf_texture_formats(&self) -> &HashSet<DrmFormat> {
+    pub fn dmabuf_texture_formats(&self) -> &IndexSet<DrmFormat> {
         self.display.dmabuf_texture_formats()
     }
 

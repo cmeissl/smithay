@@ -42,10 +42,12 @@
 use std::{
     any::{Any, TypeId},
     cell::{Ref, RefCell},
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     fmt,
     rc::Rc,
 };
+
+use indexmap::IndexSet;
 
 use super::{
     sync::SyncPoint, Bind, Blit, DebugFlags, ExportMem, Frame, ImportDma, ImportMem, Offscreen, Renderer,
@@ -940,7 +942,7 @@ where
         }
     }
 
-    fn supported_formats(&self) -> Option<HashSet<crate::backend::allocator::Format>> {
+    fn supported_formats(&self) -> Option<IndexSet<crate::backend::allocator::Format>> {
         if let Some(target) = self.target.as_ref() {
             Bind::<Target>::supported_formats(target.device.renderer())
         } else {
@@ -1112,7 +1114,7 @@ where
 {
     let target_formats = ImportDma::dmabuf_formats(target.device.renderer())
         .filter(|format| format.code == target.format)
-        .collect::<HashSet<Format>>();
+        .collect::<IndexSet<Format>>();
     let render_formats = Bind::<Dmabuf>::supported_formats(src.renderer()).unwrap_or_default();
     let formats = target_formats.intersection(&render_formats);
     let target_modifiers = formats
@@ -1929,7 +1931,7 @@ where
         ImportDma::dmabuf_formats(src.renderer())
     }
     .filter(|f| f.code == format)
-    .collect::<HashSet<_>>();
+    .collect::<IndexSet<_>>();
     let write_formats = Bind::<Dmabuf>::supported_formats(src.renderer()).unwrap_or_default();
     let modifiers = read_formats
         .intersection(&write_formats)
