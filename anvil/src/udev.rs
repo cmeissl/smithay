@@ -523,7 +523,9 @@ impl DrmLeaseHandler for AnvilState<UdevData> {
                 builder.add_connector(conn);
                 builder.add_crtc(*crtc);
                 let planes = backend.drm.planes(crtc).map_err(LeaseRejected::with_cause)?;
-                builder.add_plane(planes.primary.handle);
+                for plane in &planes.primary {
+                    builder.add_plane(plane.handle);
+                }
                 if let Some(cursor) = planes.cursor {
                     builder.add_plane(cursor.handle);
                 }
@@ -786,10 +788,11 @@ fn get_surface_dmabuf_feedback(
     // We limit the scan-out tranche to formats we can also render from
     // so that there is always a fallback render path available in case
     // the supplied buffer can not be scanned out directly
-    let planes_formats = planes
-        .primary
+    let planes_formats = surface
+        .plane_info()
         .formats
-        .into_iter()
+        .iter()
+        .copied()
         .chain(planes.overlay.into_iter().flat_map(|p| p.formats))
         .collect::<FormatSet>()
         .intersection(&all_render_formats)
