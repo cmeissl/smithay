@@ -523,11 +523,24 @@ impl DrmLeaseHandler for AnvilState<UdevData> {
                 builder.add_connector(conn);
                 builder.add_crtc(*crtc);
                 let planes = backend.drm.planes(crtc).map_err(LeaseRejected::with_cause)?;
-                for plane in &planes.primary {
-                    builder.add_plane(plane.handle);
-                }
-                if let Some(cursor) = planes.cursor {
-                    builder.add_plane(cursor.handle);
+                let (primary_plane, primary_plane_claim) = planes
+                    .primary
+                    .iter()
+                    .find_map(|plane| {
+                        backend
+                            .drm
+                            .claim_plane(plane.handle, *crtc)
+                            .map(|claim| (plane, claim))
+                    })
+                    .ok_or_else(|| LeaseRejected::default())?;
+                builder.add_plane(primary_plane.handle, primary_plane_claim);
+                if let Some((cursor, claim)) = planes.cursor.and_then(|plane| {
+                    backend
+                        .drm
+                        .claim_plane(plane.handle, *crtc)
+                        .map(|claim| (plane, claim))
+                }) {
+                    builder.add_plane(cursor.handle, claim);
                 }
             } else {
                 tracing::warn!(?conn, "Lease requested for desktop connector, denying request");

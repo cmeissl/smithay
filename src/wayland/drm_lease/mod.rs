@@ -74,7 +74,7 @@
 //! ```
 
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     fmt, io,
     num::NonZeroU32,
     os::unix::{io::OwnedFd, prelude::AsFd},
@@ -91,7 +91,7 @@ use wayland_protocols::wp::drm_lease::v1::server::*;
 use wayland_server::backend::GlobalId;
 use wayland_server::{Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource};
 
-use crate::backend::drm::{DrmDevice, DrmDeviceFd, DrmNode, NodeType};
+use crate::backend::drm::{DrmDevice, DrmDeviceFd, DrmNode, NodeType, PlaneClaim};
 
 /// Delegate type for a drm_lease global
 #[derive(Debug)]
@@ -132,7 +132,7 @@ pub struct DrmLeaseRequest {
 #[derive(Debug)]
 pub struct DrmLeaseBuilder {
     drm: DrmDeviceFd,
-    planes: HashSet<plane::Handle>,
+    planes: HashMap<plane::Handle, PlaneClaim>,
     connectors: HashSet<connector::Handle>,
     crtcs: HashSet<crtc::Handle>,
 }
@@ -142,7 +142,7 @@ impl DrmLeaseBuilder {
     pub fn new(drm: &DrmDevice) -> DrmLeaseBuilder {
         DrmLeaseBuilder {
             drm: drm.device_fd().clone(),
-            planes: HashSet::new(),
+            planes: HashMap::new(),
             connectors: HashSet::new(),
             crtcs: HashSet::new(),
         }
@@ -159,16 +159,15 @@ impl DrmLeaseBuilder {
     }
 
     /// Add a plane to the to be leased resources
-    pub fn add_plane(&mut self, plane: plane::Handle) {
-        self.planes.insert(plane);
+    pub fn add_plane(&mut self, plane: plane::Handle, claim: PlaneClaim) {
+        self.planes.insert(plane, claim);
     }
 
     fn build(self) -> io::Result<DrmLease> {
         let objects: Vec<RawResourceHandle> = self
             .planes
             .iter()
-            .cloned()
-            .map(Into::into)
+            .map(|(plane, _)| RawResourceHandle::from(*plane))
             .chain(self.connectors.iter().cloned().map(Into::into))
             .chain(self.crtcs.iter().cloned().map(Into::into))
             .collect();
@@ -193,7 +192,7 @@ impl DrmLeaseBuilder {
 #[derive(Debug, Clone)]
 pub struct DrmLease {
     drm: DrmDeviceFd,
-    planes: HashSet<plane::Handle>,
+    planes: HashMap<plane::Handle, PlaneClaim>,
     connectors: HashSet<connector::Handle>,
     crtcs: HashSet<crtc::Handle>,
     lease_id: NonZeroU32,
@@ -213,7 +212,7 @@ impl DrmLease {
     }
     /// Planes being leased
     pub fn planes(&self) -> impl Iterator<Item = &plane::Handle> {
-        self.planes.iter()
+        self.planes.iter().map(|(plane, _)| plane)
     }
     /// Lease Id
     pub fn id(&self) -> u32 {
