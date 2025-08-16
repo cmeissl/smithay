@@ -36,6 +36,7 @@ use smithay::{
         drm::{
             compositor::{DrmCompositor, FrameFlags},
             exporter::gbm::GbmFramebufferExporter,
+            exporter::gem::GemFramebufferExporter,
             output::{DrmOutput, DrmOutputManager, DrmOutputRenderElements},
             CreateDrmNodeError, DrmAccessError, DrmDevice, DrmDeviceFd, DrmError, DrmEvent, DrmEventMetadata,
             DrmEventTime, DrmNode, DrmSurface, GbmBufferedSurface, NodeType,
@@ -639,7 +640,7 @@ struct SurfaceData {
     global: Option<GlobalId>,
     drm_output: DrmOutput<
         GbmAllocator<DrmDeviceFd>,
-        GbmFramebufferExporter<DrmDeviceFd>,
+        GemFramebufferExporter<DrmDeviceFd>,
         Option<OutputPresentationFeedback>,
         DrmDeviceFd,
     >,
@@ -669,7 +670,7 @@ struct BackendData {
     active_leases: Vec<DrmLease>,
     drm_output_manager: DrmOutputManager<
         GbmAllocator<DrmDeviceFd>,
-        GbmFramebufferExporter<DrmDeviceFd>,
+        GemFramebufferExporter<DrmDeviceFd>,
         Option<OutputPresentationFeedback>,
         DrmDeviceFd,
     >,
@@ -833,7 +834,7 @@ impl AnvilState<UdevData> {
             })
             .ok_or(DeviceAddError::PrimaryGpuMissing)?;
 
-        let framebuffer_exporter = GbmFramebufferExporter::new(gbm.clone(), render_node.into());
+        let framebuffer_exporter = GemFramebufferExporter::new(gbm.clone());
 
         let color_formats = if std::env::var("ANVIL_DISABLE_10BIT").is_ok() {
             SUPPORTED_FORMATS_8BIT_ONLY
