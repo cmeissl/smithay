@@ -17,6 +17,8 @@ use super::{DrmDeviceFd, Framebuffer};
 pub mod dumb;
 #[cfg(feature = "backend_gbm")]
 pub mod gbm;
+#[cfg(feature = "backend_drm")]
+pub mod gem;
 
 /// Possible buffers to export as a framebuffer using [`ExportFramebuffer`]
 #[derive(Debug)]
